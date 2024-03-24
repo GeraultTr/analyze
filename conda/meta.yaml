@@ -1,0 +1,53 @@
+{% set data = load_setup_py_data() %}
+
+package:
+  name: data_utility.analyze
+  version: {{ data.get('version') }}
+
+source:
+  path: ..
+
+build:
+  noarch: python
+  preserve_egg_dir: True
+  number: 0
+  script: {{PYTHON}} setup.py install #--single-version-externally-managed --record=record.txt
+
+requirements:
+  build:
+    - python {{PY_VER}}
+    - setuptools
+  run:
+    - python
+    - xarray
+    - netcdf4
+    - dask
+    - scikit-learn
+    - tensorflow
+    - cudatoolkit
+    - statsmodels
+    - matplotlib
+    - tkinter
+    - umap-learn
+    - hdbscan
+    - pandas
+    - imageio
+    - PIL
+    - openalea.mtg
+    - openalea.plantgl
+
+test:
+  requires:
+    - pytest
+  imports:
+    - data_utility.analyze
+  source_files:
+    - test/**
+  commands:
+    - cd test
+    - pytest -v --ignore=test_aml.py  --ignore=test_stat.py
+
+about:
+  home: {{ data.get('url') }}
+  license: CeCILL-C
+  summary: {{ data.get('description') }}
