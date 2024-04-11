@@ -10,7 +10,7 @@ from math import floor, ceil, trunc, log10
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from data_utility.log.visualize import plot_mtg, plot_xr, custom_colorbar
+from log.visualize import plot_mtg, plot_xr, custom_colorbar
 import openalea.plantgl.all as pgl
 
 def analyze_data(outputs_dirpath, on_sums=False, on_raw_logs=False, on_performance=False, target_properties=[]):
@@ -18,8 +18,8 @@ def analyze_data(outputs_dirpath, on_sums=False, on_raw_logs=False, on_performan
     if on_sums:
         plot_csv(csv_dirpath=os.path.join(outputs_dirpath, "MTG_properties/MTG_properties_summed"), csv_name= "plant_scale_properties.csv", properties=target_properties)
     if on_raw_logs:
-        from data_utility.workflow.STM_analysis.main_workflow import run_analysis
-        from data_utility.workflow.global_sensivity.run_global_sensitivity import regression_analysis
+        from analyze.workflow.STM_analysis.main_workflow import run_analysis
+        from analyze.workflow.global_sensivity.run_global_sensitivity import regression_analysis
         xarray_deep_learning()
     if on_performance:
         plot_csv(csv_dirpath=outputs_dirpath, csv_name="simulation_performance.csv", properties=["time_step_duration"])
@@ -30,6 +30,11 @@ def plot_performance(csv_dirpath):
 def plot_csv(csv_dirpath, csv_name, properties):
     # TODO also log plant_scale_properties!!
     log = pd.read_csv(os.path.join(csv_dirpath, csv_name))
+
+    units = log.iloc[0]
+
+    # Ignore unit value for plots and initialization values for plots' readability
+    log = log[2:].astype(float)
 
     plot_path = os.path.join(csv_dirpath, "plots")
 
@@ -43,9 +48,10 @@ def plot_csv(csv_dirpath, csv_name, properties):
     for prop in properties:
         if prop in log.columns:
             fig, ax = plt.subplots()
-            ax.plot(log.index, log[prop], label=prop)
+            ax.plot(log.index, log[prop])
+            ax.set_title(f"{prop} ({units.loc[prop]})")
             ax.set_xlabel("t (h)")
-            ax.legend()
+            ax.ticklabel_format(axis='y', useOffset=True, style="sci", scilimits=(0, 0))
             fig.savefig(os.path.join(plot_path, prop + ".png"))
             plt.close()
 

@@ -35,7 +35,7 @@ if sys.version_info < (3, 7):
     sys.exit(1)
 
 setup(
-    name="data_utility.analyze",
+    name="analyze",
     version="0.0.1",
     packages=["analyze"],
     include_package_data=True,

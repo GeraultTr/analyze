@@ -1,0 +1,8 @@
+README.md
+setup.py
+analyze/analyze.py
+analyze.egg-info/PKG-INFO
+analyze.egg-info/SOURCES.txt
+analyze.egg-info/dependency_links.txt
+analyze.egg-info/top_level.txt
+test/test_import.py
