@@ -1,4 +1,3 @@
-
 import os
 import shutil
 import imageio
@@ -9,26 +8,33 @@ from openalea.mtg.plantframe import color
 from math import floor, ceil, trunc, log10
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, FFMpegWriter
+import xarray as xr
+from random import random
 
 from log.visualize import plot_mtg, plot_xr, custom_colorbar
 import openalea.plantgl.all as pgl
 
-def analyze_data(outputs_dirpath, on_sums=False, on_raw_logs=False, on_performance=False, target_properties=[]):
+
+def analyze_data(outputs_dirpath, on_sums=False, on_raw_logs=False, animate_raw_logs=False, on_performance=False,
+                 target_properties=[]):
     # TODO if not available, return not performed
     if on_sums:
-        plot_csv(csv_dirpath=os.path.join(outputs_dirpath, "MTG_properties/MTG_properties_summed"), csv_name= "plant_scale_properties.csv", properties=target_properties)
+        plot_csv(csv_dirpath=os.path.join(outputs_dirpath, "MTG_properties/MTG_properties_summed"),
+                 csv_name="plant_scale_properties.csv", properties=target_properties)
     if on_raw_logs:
         from analyze.workflow.STM_analysis.main_workflow import run_analysis
         from analyze.workflow.global_sensivity.run_global_sensitivity import regression_analysis
         xarray_deep_learning()
+    if animate_raw_logs:
+        dataset = xr.open_dataset(os.path.join(outputs_dirpath, "MTG_properties/MTG_properties_raw/merged.nc"),
+                                  engine="netcdf4")
+        xarray_animations(dataset, output_dirpath=outputs_dirpath)
     if on_performance:
         plot_csv(csv_dirpath=outputs_dirpath, csv_name="simulation_performance.csv", properties=["time_step_duration"])
 
-def plot_performance(csv_dirpath):
-    return
 
 def plot_csv(csv_dirpath, csv_name, properties):
-    # TODO also log plant_scale_properties!!
     log = pd.read_csv(os.path.join(csv_dirpath, csv_name))
 
     units = log.iloc[0]
@@ -112,10 +118,10 @@ def colorbar(title="Radius (m)", cmap='jet', lognorm=True, n_thicks_for_linear_s
 
     # If the bar is to be displayed with log scale:
     if lognorm:
-        if vmin <=0.:
+        if vmin <= 0.:
             print("WATCH OUT: when making the colorbar, vmin can't be equal or below zero when lognorm is TRUE. "
                   "vmin has been turned to 1e-10 by default.")
-            vmin=1e-10
+            vmin = 1e-10
         # We create the log-scale color bar:
         norm = color.LogNorm(vmin=vmin, vmax=vmax)
         cbar = mpl.colorbar.ColorbarBase(ax,
@@ -130,7 +136,7 @@ def colorbar(title="Radius (m)", cmap='jet', lognorm=True, n_thicks_for_linear_s
         cbar = mpl.colorbar.ColorbarBase(ax,
                                          cmap=cmap,
                                          norm=norm,
-                                         ticks=ticks, # We specify a number of ticks to display
+                                         ticks=ticks,  # We specify a number of ticks to display
                                          orientation='horizontal')
 
     # In any case, we remove stupid automatic tick labels:
@@ -212,10 +218,10 @@ def colorbar(title="Radius (m)", cmap='jet', lognorm=True, n_thicks_for_linear_s
         # And we start at a specific position from which we will add intervals for positioning the text:
         position = -0.007
         # We cover the range from vmin to vmax:
-        for i in range(0, n_intervals+1):
+        for i in range(0, n_intervals + 1):
             list_number.append(number)
             x_positions.append(position)
-            number = number + (vmax-vmin)/float(n_intervals)
+            number = number + (vmax - vmin) / float(n_intervals)
             position = position + 1 / float(n_intervals)
         # We correct the first position, if needed:
         x_positions[0] = 0.005
@@ -225,8 +231,8 @@ def colorbar(title="Radius (m)", cmap='jet', lognorm=True, n_thicks_for_linear_s
             # numbers_to_display.append("{:.0e}".format(number))
             numbers_to_display.append(sci_notation(number, decimal_digits=0, just_print_ten_power=False))
         # We remove first and last point, if needed:
-        numbers_to_display[0]=""
-        numbers_to_display[-1]=""
+        numbers_to_display[0] = ""
+        numbers_to_display[-1] = ""
 
     # We cover each number to add on the colorbar:
     for i in range(0, len(numbers_to_display)):
@@ -238,7 +244,7 @@ def colorbar(title="Radius (m)", cmap='jet', lognorm=True, n_thicks_for_linear_s
                      va='top',
                      ha=position,
                      fontsize=40,
-                     fontweight='bold', # This doesn't change much the output, unfortunately...
+                     fontweight='bold',  # This doesn't change much the output, unfortunately...
                      transform=ax.transAxes)
 
     print("The colorbar has been made!")
@@ -262,7 +268,6 @@ def resizing_and_film_making(outputs_path='outputs',
                              time_printing=True, time_position=1,
                              time_step_in_days=1., sampling_frequency=1, fps=24,
                              title=""):
-
     """
     This function enables to resize some images, add a time indication and a colorbar on them, and create a movie from it.
     :param outputs_path: the general path in which the folders containing images are located
@@ -290,7 +295,7 @@ def resizing_and_film_making(outputs_path='outputs',
     :return:
     """
 
-    images_directory=os.path.join(outputs_path, images_folder)
+    images_directory = os.path.join(outputs_path, images_folder)
     resized_images_directory = os.path.join(outputs_path, resized_images_folder)
 
     # Getting a list of the names of the images found in the directory "video":
@@ -314,9 +319,9 @@ def resizing_and_film_making(outputs_path='outputs',
         bar = Image.open(path_colorbar)
         new_size = (1200, 200)
         bar = bar.resize(new_size)
-        if colorbar_position==1:
-            box_colorbar = (-120,1070)
-        elif colorbar_position==2:
+        if colorbar_position == 1:
+            box_colorbar = (-120, 1070)
+        elif colorbar_position == 2:
             box_colorbar = (-120, 870)
 
     # 1. COMPRESSING THE IMAGES:
@@ -458,6 +463,7 @@ def resizing_and_film_making(outputs_path='outputs',
 
     return
 
+
 # Definition of a function that can create a similar movie for different scenarios' outputs
 #-------------------------------------------------------------------------------------------
 def resizing_and_film_making_for_scenarios(general_outputs_folder='outputs',
@@ -465,7 +471,7 @@ def resizing_and_film_making_for_scenarios(general_outputs_folder='outputs',
                                            resized_images_folder="root_images_resided",
                                            scenario_numbers=[1, 2, 3, 4],
                                            film_making=True,
-                                           film_name = "root_movie.gif",
+                                           film_name="root_movie.gif",
                                            image_transforming=True, resizing=False, dividing_size_by=1.,
                                            colorbar_option=True, colorbar_position=1,
                                            colorbar_title="Radius (m)",
@@ -476,7 +482,6 @@ def resizing_and_film_making_for_scenarios(general_outputs_folder='outputs',
                                            time_step_in_days=1., sampling_frequency=1, frames_per_second=24,
                                            title=""
                                            ):
-
     """
     This function creates the same type of movie in symetric outputs generated from different scenarios.
     :param general_outputs_folder: the path of the general foleder, in which respective output folders from different scenarios have been recorded
@@ -488,12 +493,11 @@ def resizing_and_film_making_for_scenarios(general_outputs_folder='outputs',
     """
 
     for i in scenario_numbers:
-
         scenario_name = 'Scenario_%.4d' % i
         scenario_path = os.path.join(general_outputs_folder, scenario_name)
 
         print("")
-        print("Creating a movie for", scenario_name,"..." )
+        print("Creating a movie for", scenario_name, "...")
 
         resizing_and_film_making(outputs_path=scenario_path,
                                  images_folder=images_folder,
@@ -516,8 +520,8 @@ def resizing_and_film_making_for_scenarios(general_outputs_folder='outputs',
 
 
 def xarray_deep_learning(dataset, mtg, global_state_extracts, global_flow_extracts, state_extracts, flow_extracts,
-                    output_dir="", global_sensitivity=True, global_plots=True, plot_architecture=True, STM_clustering=True):
-    
+                         output_dir="", global_sensitivity=False, global_plots=False, plot_architecture=False,
+                         STM_clustering=False):
     if global_sensitivity:
         # TERMINAL SENSITIVITY ANALYSIS
         # TODO : general sensitivity analysis on time-series data, but issue of post simulation Sensitivity Methods not existing
@@ -537,7 +541,8 @@ def xarray_deep_learning(dataset, mtg, global_state_extracts, global_flow_extrac
         # PLOTTING ARCHITECTURED VID LEGEND
         print("[INFO] Plotting topology and coordinate map...")
 
-        custom_colorbar(min(mtg.properties()["index"].values()), max(mtg.properties()["index"].values()), unit="Vid number")
+        custom_colorbar(min(mtg.properties()["index"].values()), max(mtg.properties()["index"].values()),
+                        unit="Vid number")
 
         scene = pgl.Scene()
         scene += plot_mtg(mtg,
@@ -558,4 +563,56 @@ def xarray_deep_learning(dataset, mtg, global_state_extracts, global_flow_extrac
         pool_locals.update(state_extracts)
         pool_locals.update(flow_extracts)
         run_analysis(file=dataset, output_path=output_dir, extract_props=pool_locals)
+
+
+def xarray_animations(dataset, output_dirpath):
+    dataset.drop_dims("default")
+    pool = "C_hexose_root"
+    balance_dict = dict(hexose_exudation={"type": "output", "conversion": 1.},
+                        hexose_uptake_from_soil={"type": "input", "conversion": 1.},
+                        mucilage_secretion={"type": "output", "conversion": 1.},
+                        cells_release={"type": "output", "conversion": 1.},
+                        maintenance_respiration={"type": "output", "conversion": 1 / 6},
+                        hexose_consumption_by_growth={"type": "output", "conversion": 1.},
+                        hexose_diffusion_from_phloem={"type": "input", "conversion": 1.},
+                        hexose_active_production_from_phloem={"type": "input", "conversion": 1.},
+                        sucrose_loading_in_phloem={"type": "output", "conversion": 2},
+                        hexose_mobilization_from_reserve={"type": "input", "conversion": 1.},
+                        hexose_immobilization_as_reserve={"type": "output", "conversion": 1.},
+                        deficit_hexose_root={"type": "output", "conversion": 1.},
+                        AA_synthesis={"type": "output", "conversion": 1.4},
+                        AA_catabolism={"type": "input", "conversion": 1 / 1.4},
+                        N_metabolic_respiration={"type": "output", "conversion": 1 / 6})
+
+    used_dataset = dataset[list(balance_dict.keys())].sum(dim="vid")
+
+    for name, meta in balance_dict.items():
+        if meta["type"] == "output":
+            used_dataset[name] = - used_dataset[name] * meta["conversion"]
+        else:
+            used_dataset[name] = used_dataset[name] * meta["conversion"]
+
+    only_inputs = used_dataset.where(used_dataset > 0., 0.).to_array()
+    only_outputs = - used_dataset.where(used_dataset < 0., 0.).to_array()
+
+    fig, ax = plt.subplots(2, 1)
+    fig.set_size_inches(10.5, 18.5)
+    colors = np.array([np.random.rand(3,) for k in range(len(balance_dict.keys()))])
+    def update(time):
+        ax[0].clear()
+        to_plot = np.array(only_inputs.sel(t=time)).reshape(1, -1)[0]
+        dataset["C_hexose_root"].sum(dim="vid").plot.line(x="t", ax=ax[0])
+        ax[0].scatter(x=[time], y=dataset["C_hexose_root"].sum(dim="vid").sel(t=time).values, c="r")
+        ax[0].set_title(f"Input flows : {'{:.2E}'.format(np.sum(to_plot))} mol.s-1")
+
+        ax[1].clear()
+        to_plot = np.array(only_outputs.sel(t=time)).reshape(1, -1)[0]
+        labels = np.array(list(balance_dict.keys()))[to_plot > 0.]
+        ax[1].pie(to_plot[to_plot > 0.], startangle=0, colors=colors[to_plot > 0.])
+        ax[1].set_title(f"Ouput flows : {'{:.2E}'.format(np.sum(to_plot))} mol.s-1")
+        ax[1].legend(labels=labels, loc='best', bbox_to_anchor=(0.85, 1.025))
+
+    animation = FuncAnimation(fig, update, frames=only_outputs.t[1:], repeat=False)
+    FFwriter = FFMpegWriter(fps=15, codec="libx264")
+    animation.save(os.path.join(output_dirpath, "MTG_properties\MTG_properties_raw\pies.mp4"), writer=FFwriter, dpi=100)
 
