@@ -27,9 +27,22 @@ def analyze_data(outputs_dirpath, on_sums=False, on_raw_logs=False, animate_raw_
         from analyze.workflow.global_sensivity.run_global_sensitivity import regression_analysis
         xarray_deep_learning()
     if animate_raw_logs:
+        fps=15
         dataset = xr.open_dataset(os.path.join(outputs_dirpath, "MTG_properties/MTG_properties_raw/merged.nc"),
                                   engine="netcdf4")
-        xarray_animations(dataset, output_dirpath=outputs_dirpath)
+        dataset.drop_dims("default")
+        # CN_balance_animation(dataset=dataset, outputs_dirpath=outputs_dirpath, fps=fps)
+        # surface_repartition(dataset, output_dirpath=outputs_dirpath, fps=fps)
+        # apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
+        #                        flow="hexose_exudation", summed_input="hexose_diffusion_from_phloem", color_prop="Nm")
+        # apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
+        #                        flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="C_hexose_root")
+        # trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="distance_from_tip", y="hexose_exudation",
+        #                   color="root_exchange_surface", fps=fps)
+        dataset["gradient"] = (dataset.C_hexose_root * dataset.struct_mass / dataset.symplasmic_volume) - dataset.C_hexose_soil
+        trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="root_exchange_surface", y="gradient",
+                          color="hexose_exudation", fps=fps)
+
     if on_performance:
         plot_csv(csv_dirpath=outputs_dirpath, csv_name="simulation_performance.csv", properties=["time_step_duration"])
 
@@ -565,9 +578,7 @@ def xarray_deep_learning(dataset, mtg, global_state_extracts, global_flow_extrac
         run_analysis(file=dataset, output_path=output_dir, extract_props=pool_locals)
 
 
-def xarray_animations(dataset, output_dirpath):
-    dataset.drop_dims("default")
-    pool = "C_hexose_root"
+def CN_balance_animation(dataset, outputs_dirpath, fps):
     balance_dict = dict(hexose_exudation={"type": "output", "conversion": 1.},
                         hexose_uptake_from_soil={"type": "input", "conversion": 1.},
                         mucilage_secretion={"type": "output", "conversion": 1.},
@@ -583,6 +594,29 @@ def xarray_animations(dataset, output_dirpath):
                         AA_synthesis={"type": "output", "conversion": 1.4},
                         AA_catabolism={"type": "input", "conversion": 1 / 1.4},
                         N_metabolic_respiration={"type": "output", "conversion": 1 / 6})
+    pie_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="C_hexose_root", balance_dict=balance_dict, fps=fps)
+    balance_dict = dict(diffusion_AA_phloem={"type": "input", "conversion": 1.},
+                        import_AA={"type": "input", "conversion": 1.},
+                        diffusion_AA_soil={"type": "output", "conversion": 1.},
+                        export_AA={"type": "output", "conversion": 1.},
+                        AA_synthesis={"type": "input", "conversion": 1.},
+                        storage_synthesis={"type": "output", "conversion": 65},
+                        storage_catabolism={"type": "input", "conversion": 1 / 65},
+                        AA_catabolism={"type": "output", "conversion": 1.},
+                        amino_acids_consumption_by_growth={"type": "output", "conversion": 1.})
+    pie_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="AA", balance_dict=balance_dict,
+                      input_composition=True, fps=fps)
+    balance_dict = dict(import_Nm={"type": "input", "conversion": 1.},
+                        diffusion_Nm_soil={"type": "output", "conversion": 1.},
+                        diffusion_Nm_xylem={"type": "input", "conversion": 1.},
+                        export_Nm={"type": "output", "conversion": 1.},
+                        AA_synthesis={"type": "output", "conversion": 1.4},
+                        AA_catabolism={"type": "input", "conversion": 1./1.4})
+    pie_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="Nm", balance_dict=balance_dict,
+                      input_composition=True, fps=fps)
+
+
+def pie_balance_xarray_animations(dataset, output_dirpath, pool, balance_dict, input_composition=False, fps=15):
 
     used_dataset = dataset[list(balance_dict.keys())].sum(dim="vid")
 
@@ -595,15 +629,23 @@ def xarray_animations(dataset, output_dirpath):
     only_inputs = used_dataset.where(used_dataset > 0., 0.).to_array()
     only_outputs = - used_dataset.where(used_dataset < 0., 0.).to_array()
 
-    fig, ax = plt.subplots(2, 1)
+    if input_composition:
+        fig, ax = plt.subplots(3, 1)
+    else:
+        fig, ax = plt.subplots(2, 1)
+
     fig.set_size_inches(10.5, 18.5)
     colors = np.array([np.random.rand(3,) for k in range(len(balance_dict.keys()))])
     def update(time):
         ax[0].clear()
         to_plot = np.array(only_inputs.sel(t=time)).reshape(1, -1)[0]
-        dataset["C_hexose_root"].sum(dim="vid").plot.line(x="t", ax=ax[0])
-        ax[0].scatter(x=[time], y=dataset["C_hexose_root"].sum(dim="vid").sel(t=time).values, c="r")
-        ax[0].set_title(f"Input flows : {'{:.2E}'.format(np.sum(to_plot))} mol.s-1")
+        ds_mean = dataset[pool].mean(dim="vid")
+        ds_std = dataset[pool].std(dim="vid")
+        ax[0].plot([time, time], [0, ds_mean.max()], c="r")
+        ax[0].fill_between(ds_mean.t, (ds_mean-ds_std).values[0], (ds_mean+ds_std).values[0])
+        ds_mean.plot.line(x="t", ax=ax[0], c="b")
+        if not input_composition:
+            ax[0].set_title(f"Input flows : {'{:.2E}'.format(np.sum(to_plot))} mol.s-1")
 
         ax[1].clear()
         to_plot = np.array(only_outputs.sel(t=time)).reshape(1, -1)[0]
@@ -612,7 +654,90 @@ def xarray_animations(dataset, output_dirpath):
         ax[1].set_title(f"Ouput flows : {'{:.2E}'.format(np.sum(to_plot))} mol.s-1")
         ax[1].legend(labels=labels, loc='best', bbox_to_anchor=(0.85, 1.025))
 
-    animation = FuncAnimation(fig, update, frames=only_outputs.t[1:], repeat=False)
-    FFwriter = FFMpegWriter(fps=15, codec="libx264")
-    animation.save(os.path.join(output_dirpath, "MTG_properties\MTG_properties_raw\pies.mp4"), writer=FFwriter, dpi=100)
+        if input_composition:
+            ax[2].clear()
+            to_plot = np.array(only_inputs.sel(t=time)).reshape(1, -1)[0]
+            labels = np.array(list(balance_dict.keys()))[to_plot > 0.]
+            ax[2].pie(to_plot[to_plot > 0.], startangle=0, colors=colors[to_plot > 0.])
+            ax[2].set_title(f"Input flows : {'{:.2E}'.format(np.sum(to_plot))} mol.s-1")
+            ax[2].legend(labels=labels, loc='best', bbox_to_anchor=(0.85, 1.025))
 
+    animation = FuncAnimation(fig, update, frames=only_outputs.t[1:], repeat=False)
+    FFwriter = FFMpegWriter(fps=fps, codec="libx264")
+    animation.save(os.path.join(output_dirpath, f"MTG_properties\MTG_properties_raw\{pool}_pies.mp4"), writer=FFwriter, dpi=100)
+
+
+def surface_repartition(dataset, output_dirpath, fps):
+
+    to_plot = dataset[["distance_from_tip", "volume", "root_exchange_surface"]]
+    to_plot["normalized_exchange_surface"] = to_plot.root_exchange_surface / to_plot.volume
+
+    fig, ax = plt.subplots()
+    fig.set_size_inches(10.5, 10.5)
+
+    def update(time):
+        ax.clear()
+        time_step_data = to_plot.sel(t=time).dropna(dim="vid")
+        ax.scatter(time_step_data.distance_from_tip.values[0], time_step_data.normalized_exchange_surface.values[0],
+                   c=time_step_data.vid)
+        ax.set_xlabel("distance_to_tip (m)")
+        ax.set_ylabel("normalized_exchange_surface (m2.m-3)")
+        ax.set_title(f"time = {time}")
+
+    animation = FuncAnimation(fig, update, frames=to_plot.t[1:], repeat=False)
+    FFwriter = FFMpegWriter(fps=fps, codec="libx264")
+    animation.save(os.path.join(output_dirpath, f"MTG_properties\MTG_properties_raw\surface_scatter.mp4"), writer=FFwriter,
+                   dpi=100)
+
+
+def apex_zone_contribution(dataset, output_dirpath, apex_zone_length, flow, summed_input, color_prop):
+    fig, ax = plt.subplots(2, 1)
+    fig.set_size_inches(10.5, 18.5)
+    dataset = dataset.where(dataset.t>25)
+    apex_zone = dataset.where(dataset["distance_from_tip"] <= apex_zone_length, 0.)
+    apex_proportion = apex_zone[flow].sum(dim="vid") / dataset[flow].sum(dim="vid")
+    length_proportion = apex_zone["length"].sum(dim="vid") / dataset["length"].sum(dim="vid")
+    apex_proportion.plot.line(x="t", ax=ax[0], label=f"{flow} proportion")
+    length_proportion.plot.line(x="t", ax=ax[0], label="length proportion")
+    ax[0].legend()
+    ax[0].set_ylabel("proportion")
+
+    apices_outperform = 100 * (apex_proportion - length_proportion) / length_proportion
+
+    m = ax[1].scatter(dataset[summed_input].sum(dim="vid") / dataset["struct_mass"].sum(dim="vid"), apices_outperform, c=apex_zone[color_prop].mean(dim="vid"))
+    fig.colorbar(m, ax=ax[1], label=color_prop)
+    ax[1].set_xlabel("Summed input par mass unit : " + summed_input + " (mol.g-1.s-1)")
+    ax[1].set_ylabel("Outperforming of mean per length exchanges (%)")
+    ax[1].legend()
+
+    fig.savefig(os.path.join(output_dirpath, f"MTG_properties\\MTG_properties_raw\\apex_contribution_{flow}.png"))
+    plt.close()
+
+
+def trajectories_plot(dataset, output_dirpath, x, y, color=None, fps=15):
+    fig, ax = plt.subplots()
+    fig.set_size_inches(10.5, 10.5)
+
+    def update(time):
+        ax.clear()
+        time_step_data = dataset.sel(t=time).dropna(dim="vid")
+        #ax.set_xlim(dataset[x].min(), dataset[x].max())
+        #ax.set_ylim(dataset[y].min(), dataset[y].max())
+        ax.set_xlim(time_step_data[x].mean(dim="vid") - 3 * time_step_data[x].std(dim="vid"),
+                    time_step_data[x].mean(dim="vid") + 3 * time_step_data[x].std(dim="vid"))
+
+        ax.set_ylim(time_step_data[y].mean(dim="vid") - 3* time_step_data[y].std(dim="vid"),
+                    time_step_data[y].mean(dim="vid") + 3*time_step_data[y].std(dim="vid"))
+        if color is None:
+            ax.scatter(time_step_data[x].values[0], time_step_data[y].values[0], c=time_step_data.vid)
+        else:
+            ax.scatter(time_step_data[x].values[0], time_step_data[y].values[0],
+                       c=time_step_data[color].values[0])
+        ax.set_xlabel(x)
+        ax.set_ylabel(y)
+        ax.set_title(f"time = {time}")
+
+    animation = FuncAnimation(fig, update, frames=dataset.t, repeat=False)
+    FFwriter = FFMpegWriter(fps=15, codec="libx264")
+    animation.save(os.path.join(output_dirpath, f"MTG_properties\MTG_properties_raw\{y} f({x}) C {color}_scatter.mp4"),
+                   writer=FFwriter, dpi=100)
