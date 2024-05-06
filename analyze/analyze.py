@@ -16,7 +16,7 @@ from log.visualize import plot_mtg, plot_xr, custom_colorbar
 import openalea.plantgl.all as pgl
 
 
-def analyze_data(outputs_dirpath, on_sums=False, on_raw_logs=False, animate_raw_logs=False, on_performance=False,
+def analyze_data(outputs_dirpath, on_sums=False, on_raw_logs=False, animate_raw_logs=False, on_shoot_logs=False, on_performance=False,
                  target_properties=[]):
     # TODO if not available, return not performed
     if on_sums:
@@ -43,6 +43,9 @@ def analyze_data(outputs_dirpath, on_sums=False, on_raw_logs=False, animate_raw_
         trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="root_exchange_surface", y="gradient",
                           color="hexose_exudation", fps=fps)
 
+    if on_shoot_logs:
+        cnwheat_plot_csv(csv_dirpath=os.path.join(outputs_dirpath, "MTG_properties/shoot_properties"))
+
     if on_performance:
         plot_csv(csv_dirpath=outputs_dirpath, csv_name="simulation_performance.csv", properties=["time_step_duration"])
 
@@ -67,13 +70,93 @@ def plot_csv(csv_dirpath, csv_name, properties):
     for prop in properties:
         if prop in log.columns:
             fig, ax = plt.subplots()
-            ax.plot(log.index, log[prop])
+            ax.plot(log.index.values, log[prop])
             ax.set_title(f"{prop} ({units.loc[prop]})")
             ax.set_xlabel("t (h)")
             ax.ticklabel_format(axis='y', useOffset=True, style="sci", scilimits=(0, 0))
             fig.savefig(os.path.join(plot_path, prop + ".png"))
             plt.close()
 
+def cnwheat_plot_csv(csv_dirpath, ):
+    plot_path = os.path.join(csv_dirpath, "plots")
+
+    if os.path.isdir(plot_path):
+        shutil.rmtree(plot_path)
+
+    os.mkdir(plot_path)
+
+    from fspmwheat import cnwheat_facade
+
+    # --- Generate graphs from postprocessing files
+    plt.ioff()
+    delta_t = 3600
+    df_elt = pd.read_csv(os.path.join(csv_dirpath, "elements_outputs.csv"))
+    df_org = pd.read_csv(os.path.join(csv_dirpath, "organs_outputs.csv"))
+    df_hz = pd.read_csv(os.path.join(csv_dirpath, "hiddenzones_outputs.csv"))
+    df_SAM = pd.read_csv(os.path.join(csv_dirpath, "axes_outputs.csv"))
+    df_soil = pd.read_csv(os.path.join(csv_dirpath, "soil_outputs.csv"))
+
+    postprocessing_df_dict = {}
+    pp_df_ax, pp_df_hz, pp_df_org, pp_df_elt, pp_df_soil = cnwheat_facade.CNWheatFacade.postprocessing(
+                                axes_outputs_df=df_SAM,
+                                hiddenzone_outputs_df=df_hz,
+                                organs_outputs_df=df_org,
+                                elements_outputs_df=df_elt,
+                                soils_outputs_df=df_soil,
+                                delta_t=delta_t)
+
+    cnwheat_facade.CNWheatFacade.graphs(
+        axes_postprocessing_df=pp_df_ax,
+        hiddenzones_postprocessing_df=pp_df_hz,
+        organs_postprocessing_df=pp_df_org,
+        elements_postprocessing_df=pp_df_elt,
+        soils_postprocessing_df=pp_df_soil,
+        graphs_dirpath=plot_path)
+
+    # --- Additional graphs
+    from cnwheat import tools as cnwheat_tools
+    colors = ['blue', 'darkorange', 'green', 'red', 'darkviolet', 'gold', 'magenta', 'brown', 'darkcyan', 'grey',
+              'lime']
+    colors = colors + colors
+
+    # 0) Phyllochron
+    df_SAM = df_SAM[df_SAM['axis'] == 'MS']
+    grouped_df = pp_df_hz[pp_df_hz['axis'] == 'MS'].groupby(['plant', 'metamer'])[['t', 'leaf_is_emerged']]
+    leaf_emergence = {}
+    for group_name, data in grouped_df:
+        plant, metamer = group_name[0], group_name[1]
+        if metamer == 3 or True not in data['leaf_is_emerged'].unique():
+            continue
+        leaf_emergence_t = data[data['leaf_is_emerged'] == True].iloc[0]['t']
+        leaf_emergence[(plant, metamer)] = leaf_emergence_t
+
+    phyllochron = {'plant': [], 'metamer': [], 'phyllochron': []}
+    for key, leaf_emergence_t in sorted(leaf_emergence.items()):
+        plant, metamer = key[0], key[1]
+        if metamer == 4:
+            continue
+        phyllochron['plant'].append(plant)
+        phyllochron['metamer'].append(metamer)
+        prev_leaf_emergence_t = leaf_emergence[(plant, metamer - 1)]
+        if df_SAM[(df_SAM['t'] == leaf_emergence_t) | (df_SAM['t'] == prev_leaf_emergence_t)].sum_TT.count() == 2:
+            phyllo_DD = df_SAM[(df_SAM['t'] == leaf_emergence_t)].sum_TT.values[0] - \
+                        df_SAM[(df_SAM['t'] == prev_leaf_emergence_t)].sum_TT.values[0]
+        else:
+            phyllo_DD = np.nan
+        phyllochron['phyllochron'].append(phyllo_DD)
+
+    if len(phyllochron['metamer']) > 0:
+        fig, ax = plt.subplots()
+        plt.xlim((int(min(phyllochron['metamer']) - 1), int(max(phyllochron['metamer']) + 1)))
+        plt.ylim(ymin=0, ymax=150)
+        ax.plot(phyllochron['metamer'], phyllochron['phyllochron'], color='b', marker='o')
+        for i, j in zip(phyllochron['metamer'], phyllochron['phyllochron']):
+            ax.annotate(str(int(round(j, 0))), xy=(i, j + 2), ha='center')
+        ax.set_xlabel('Leaf number')
+        ax.set_ylabel('Phyllochron (Degree Day)')
+        ax.set_title('phyllochron')
+        plt.savefig(os.path.join(plot_path, 'phyllochron' + '.PNG'))
+        plt.close()
 
 # Define function for string formatting of scientific notation
 def sci_notation(num, just_print_ten_power=True, decimal_digits=0, precision=None, exponent=None):
