@@ -31,14 +31,14 @@ def analyze_data(outputs_dirpath, on_sums=False, on_raw_logs=False, animate_raw_
         dataset = xr.open_dataset(os.path.join(outputs_dirpath, "MTG_properties/MTG_properties_raw/merged.nc"),
                                   engine="netcdf4")
         dataset.drop_dims("default")
-        # CN_balance_animation(dataset=dataset, outputs_dirpath=outputs_dirpath, fps=fps)
-        # surface_repartition(dataset, output_dirpath=outputs_dirpath, fps=fps)
-        # apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
-        #                        flow="hexose_exudation", summed_input="hexose_diffusion_from_phloem", color_prop="Nm")
-        # apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
-        #                        flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="C_hexose_root")
-        # trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="distance_from_tip", y="hexose_exudation",
-        #                   color="root_exchange_surface", fps=fps)
+        CN_balance_animation(dataset=dataset, outputs_dirpath=outputs_dirpath, fps=fps)
+        surface_repartition(dataset, output_dirpath=outputs_dirpath, fps=fps)
+        apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
+                               flow="hexose_exudation", summed_input="hexose_diffusion_from_phloem", color_prop="Nm")
+        apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
+                               flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="C_hexose_root")
+        trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="distance_from_tip", y="hexose_exudation",
+                          color="root_exchange_surface", fps=fps)
         dataset["gradient"] = (dataset.C_hexose_root * dataset.struct_mass / dataset.symplasmic_volume) - dataset.C_hexose_soil
         trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="root_exchange_surface", y="gradient",
                           color="hexose_exudation", fps=fps)
@@ -47,10 +47,10 @@ def analyze_data(outputs_dirpath, on_sums=False, on_raw_logs=False, animate_raw_
         cnwheat_plot_csv(csv_dirpath=os.path.join(outputs_dirpath, "MTG_properties/shoot_properties"))
 
     if on_performance:
-        plot_csv(csv_dirpath=outputs_dirpath, csv_name="simulation_performance.csv", properties=["time_step_duration"])
+        plot_csv(csv_dirpath=outputs_dirpath, csv_name="simulation_performance.csv", stacked=True)
 
 
-def plot_csv(csv_dirpath, csv_name, properties):
+def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
     log = pd.read_csv(os.path.join(csv_dirpath, csv_name))
 
     units = log.iloc[0]
@@ -65,17 +65,30 @@ def plot_csv(csv_dirpath, csv_name, properties):
 
     os.mkdir(plot_path)
 
-    if properties == []:
+    if properties is None:
         properties = log.columns
+
+    if stacked:
+        fig, ax = plt.subplots()
     for prop in properties:
         if prop in log.columns:
-            fig, ax = plt.subplots()
+            if not stacked:
+                fig, ax = plt.subplots()
             ax.plot(log.index.values, log[prop])
-            ax.set_title(f"{prop} ({units.loc[prop]})")
-            ax.set_xlabel("t (h)")
-            ax.ticklabel_format(axis='y', useOffset=True, style="sci", scilimits=(0, 0))
-            fig.savefig(os.path.join(plot_path, prop + ".png"))
-            plt.close()
+            if not stacked:
+                ax.set_title(f"{prop} ({units.loc[prop]})")
+                ax.set_xlabel("t (h)")
+                ax.ticklabel_format(axis='y', useOffset=True, style="sci", scilimits=(0, 0))
+                fig.savefig(os.path.join(plot_path, prop + ".png"))
+                plt.close()
+
+    if stacked:
+        ax.set_title(f"{prop} ({units.loc[prop]})")
+        ax.set_xlabel("t (h)")
+        ax.ticklabel_format(axis='y', useOffset=True, style="sci", scilimits=(0, 0))
+        fig.savefig(os.path.join(plot_path, prop + ".png"))
+        plt.close()
+
 
 def cnwheat_plot_csv(csv_dirpath, ):
     plot_path = os.path.join(csv_dirpath, "plots")
@@ -157,6 +170,22 @@ def cnwheat_plot_csv(csv_dirpath, ):
         ax.set_title('phyllochron')
         plt.savefig(os.path.join(plot_path, 'phyllochron' + '.PNG'))
         plt.close()
+
+    # 2) LAI
+
+    PLANT_DENSITY = {1: 250.}
+    pp_df_elt['green_area_rep'] = pp_df_elt.green_area * pp_df_elt.nb_replications
+    grouped_df = pp_df_elt[(pp_df_elt.axis == 'MS') & (pp_df_elt.element == 'LeafElement1')].groupby(['t', 'plant'])
+    LAI_dict = {'t': [], 'plant': [], 'LAI': []}
+    for name, data in grouped_df:
+        t, plant = name[0], name[1]
+        LAI_dict['t'].append(t)
+        LAI_dict['plant'].append(plant)
+        LAI_dict['LAI'].append(data['green_area_rep'].sum() * PLANT_DENSITY[plant])
+
+    cnwheat_tools.plot_cnwheat_ouputs(pd.DataFrame(LAI_dict), 't', 'LAI', x_label='Time (Hour)', y_label='LAI',
+                                      plot_filepath=os.path.join(plot_path, 'LAI.PNG'), explicit_label=False)
+
 
 # Define function for string formatting of scientific notation
 def sci_notation(num, just_print_ten_power=True, decimal_digits=0, precision=None, exponent=None):
