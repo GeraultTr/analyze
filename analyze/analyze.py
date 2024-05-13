@@ -17,7 +17,7 @@ import openalea.plantgl.all as pgl
 
 
 def analyze_data(outputs_dirpath, on_sums=False, on_raw_logs=False, animate_raw_logs=False, on_shoot_logs=False, on_performance=False,
-                 target_properties=[]):
+                 target_properties=None):
     # TODO if not available, return not performed
     if on_sums:
         plot_csv(csv_dirpath=os.path.join(outputs_dirpath, "MTG_properties/MTG_properties_summed"),
@@ -70,11 +70,16 @@ def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
 
     if stacked:
         fig, ax = plt.subplots()
+
     for prop in properties:
         if prop in log.columns:
+            if len(prop) > 10:
+                label = prop[:10]
+            else:
+                label = prop
             if not stacked:
                 fig, ax = plt.subplots()
-            ax.plot(log.index.values, log[prop])
+            ax.plot(log.index.values, log[prop], label=label)
             if not stacked:
                 ax.set_title(f"{prop} ({units.loc[prop]})")
                 ax.set_xlabel("t (h)")
@@ -83,6 +88,7 @@ def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
                 plt.close()
 
     if stacked:
+        ax.legend()
         ax.set_title(f"{prop} ({units.loc[prop]})")
         ax.set_xlabel("t (h)")
         ax.ticklabel_format(axis='y', useOffset=True, style="sci", scilimits=(0, 0))
@@ -90,7 +96,7 @@ def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
         plt.close()
 
 
-def cnwheat_plot_csv(csv_dirpath, ):
+def cnwheat_plot_csv(csv_dirpath):
     plot_path = os.path.join(csv_dirpath, "plots")
 
     if os.path.isdir(plot_path):
