@@ -72,9 +72,9 @@ def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
         fig, ax = plt.subplots()
 
     for prop in properties:
-        if prop in log.columns:
-            if len(prop) > 10:
-                label = prop[:10]
+        if prop in log.columns and prop != "Unnamed: 0":
+            if len(prop) > 15:
+                label = prop[:15]
             else:
                 label = prop
             if not stacked:
