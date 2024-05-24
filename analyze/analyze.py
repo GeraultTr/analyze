@@ -1,4 +1,5 @@
 import os
+import sys
 import shutil
 import imageio
 from PIL import Image, ImageDraw, ImageFont
@@ -16,39 +17,94 @@ from log.visualize import plot_mtg, plot_xr, custom_colorbar
 import openalea.plantgl.all as pgl
 
 
-def analyze_data(outputs_dirpath, on_sums=False, on_raw_logs=False, animate_raw_logs=False, on_shoot_logs=False, on_performance=False,
-                 target_properties=None):
+
+balance_dicts = {"hexose": dict(hexose_exudation={"type": "output", "conversion": 1.},
+                        hexose_uptake_from_soil={"type": "input", "conversion": 1.},
+                        mucilage_secretion={"type": "output", "conversion": 1.},
+                        cells_release={"type": "output", "conversion": 1.},
+                        maintenance_respiration={"type": "output", "conversion": 1 / 6},
+                        hexose_consumption_by_growth={"type": "output", "conversion": 1.},
+                        hexose_diffusion_from_phloem={"type": "input", "conversion": 1.},
+                        hexose_active_production_from_phloem={"type": "input", "conversion": 1.},
+                        sucrose_loading_in_phloem={"type": "output", "conversion": 2},
+                        hexose_mobilization_from_reserve={"type": "input", "conversion": 1.},
+                        hexose_immobilization_as_reserve={"type": "output", "conversion": 1.},
+                        deficit_hexose_root={"type": "output", "conversion": 1.},
+                        AA_synthesis={"type": "output", "conversion": 1.4},
+                        AA_catabolism={"type": "input", "conversion": 1 / 1.4},
+                        N_metabolic_respiration={"type": "output", "conversion": 1 / 6}),
+
+                "AA": dict(diffusion_AA_phloem={"type": "input", "conversion": 1.},
+                        import_AA={"type": "input", "conversion": 1.},
+                        diffusion_AA_soil={"type": "output", "conversion": 1.},
+                        export_AA={"type": "output", "conversion": 1.},
+                        AA_synthesis={"type": "input", "conversion": 1.},
+                        storage_synthesis={"type": "output", "conversion": 65},
+                        storage_catabolism={"type": "input", "conversion": 1 / 65},
+                        AA_catabolism={"type": "output", "conversion": 1.},
+                        amino_acids_consumption_by_growth={"type": "output", "conversion": 1.}), 
+
+                "Nm": dict(import_Nm={"type": "input", "conversion": 1.},
+                    diffusion_Nm_soil={"type": "output", "conversion": 1.},
+                    diffusion_Nm_xylem={"type": "input", "conversion": 1.},
+                    export_Nm={"type": "output", "conversion": 1.},
+                    AA_synthesis={"type": "output", "conversion": 1.4},
+                    AA_catabolism={"type": "input", "conversion": 1./1.4})
+                 }
+
+
+def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, animate_raw_logs=False, on_shoot_logs=False, on_performance=False,
+                 target_properties=None, **kwargs):
     # TODO if not available, return not performed
+    print("[INFO] Starting data analysis")
     if on_sums:
+        print(" [INFO] Producing 2D plots from summed and averaged properties")
         plot_csv(csv_dirpath=os.path.join(outputs_dirpath, "MTG_properties/MTG_properties_summed"),
                  csv_name="plant_scale_properties.csv", properties=target_properties)
+        print(" [INFO] Finished 2d plots")
     if on_raw_logs:
+        print(" [INFO] Starting deep learning analysis on raw logs...")
         from analyze.workflow.STM_analysis.main_workflow import run_analysis
         from analyze.workflow.global_sensivity.run_global_sensitivity import regression_analysis
         xarray_deep_learning()
+        print(" [INFO] Finished DL")
     if animate_raw_logs:
+        print("     [INFO] Starting plot production from raw logs...")
+        raw_dirpath = os.path.join(outputs_dirpath, "MTG_properties/MTG_properties_raw/")
         fps=15
-        dataset = xr.open_dataset(os.path.join(outputs_dirpath, "MTG_properties/MTG_properties_raw/merged.nc"),
-                                  engine="netcdf4")
-        dataset.drop_dims("default")
-        CN_balance_animation(dataset=dataset, outputs_dirpath=outputs_dirpath, fps=fps)
-        surface_repartition(dataset, output_dirpath=outputs_dirpath, fps=fps)
-        apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
-                               flow="hexose_exudation", summed_input="hexose_diffusion_from_phloem", color_prop="Nm")
-        apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
-                               flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="C_hexose_root")
-        trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="distance_from_tip", y="hexose_exudation",
-                          color="root_exchange_surface", fps=fps)
-        dataset["gradient"] = (dataset.C_hexose_root * dataset.struct_mass / dataset.symplasmic_volume) - dataset.C_hexose_soil
-        trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="root_exchange_surface", y="gradient",
-                          color="hexose_exudation", fps=fps)
+        dataset = open_and_merge_datasets(scenarios=scenarios)
+
+        dataset["NAE"] = Indicators.Nitrogen_Aquisition_Efficiency(d=dataset)
+
+        #CN_balance_animation_pipeline(dataset=dataset, outputs_dirpath=outputs_dirpath, fps=fps)
+        #surface_repartition(dataset, output_dirpath=outputs_dirpath, fps=fps)
+        # apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
+        #                        flow="hexose_exudation", summed_input="hexose_diffusion_from_phloem", color_prop="Nm")
+        # apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
+        #                        flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="C_hexose_root")
+        trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="distance_from_tip", y="NAE",
+                         color=None, fps=fps)
+        #dataset["gradient"] = (dataset.C_hexose_root * dataset.struct_mass / dataset.symplasmic_volume) - dataset.C_hexose_soil
+        #trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="root_exchange_surface", y="gradient",
+        #                  color="hexose_exudation", fps=fps)
+        #z_zone_contribution(dataset=dataset, output_dirpath=raw_dirpath, zmin=-0.08, zmax=-0.012, flow="import_Nm")
+        #z_zone_contribution(dataset=dataset, output_dirpath=outputs_dirpath, zmin=-0.08, zmax=-0.012, flow="NAE", mean_proportion=True)
+        
+        #pipeline_z_bins_animations(dataset=dataset, prop="NAE", metabolite="hexose", output_path=raw_dirpath)
+        #pipeline_z_bins_animations(dataset=dataset, prop="NAE", metabolite="AA", output_path=raw_dirpath)
+        
+
+        print("     [INFO] Finished plotting raw logs")
 
     if on_shoot_logs:
+        print(" [INFO] Starting producing CN-Wheat plots...")
         cnwheat_plot_csv(csv_dirpath=os.path.join(outputs_dirpath, "MTG_properties/shoot_properties"))
+        print(" [INFO] Finished  CN-Wheat plots")
 
     if on_performance:
+        print(" [INFO] Analysing running performances...")
         plot_csv(csv_dirpath=outputs_dirpath, csv_name="simulation_performance.csv", stacked=True)
-
+        print(" [INFO] Finished plotting performances")
 
 def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
     log = pd.read_csv(os.path.join(csv_dirpath, csv_name))
@@ -94,6 +150,71 @@ def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
         ax.ticklabel_format(axis='y', useOffset=True, style="sci", scilimits=(0, 0))
         fig.savefig(os.path.join(plot_path, prop + ".png"))
         plt.close()
+
+
+def plot_csv_stackable(fig, ax, csv_dirpath, csv_name, property, std_prop=None, units = False, scatter=True):
+    log = pd.read_csv(os.path.join(csv_dirpath, csv_name))
+
+    if units:
+        units = log.iloc[0]
+
+        # Ignore unit value
+        log = log[1:].astype(float)
+
+    if scatter:
+        
+        if std_prop:
+            ax.errorbar(log.index.values, log[property], yerr=log[std_prop])
+        else:
+            ax.scatter(log.index.values, log[property], label=property)
+    else:
+        ax.plot(log.index.values, log[property], label=property)
+
+    return fig, ax
+
+
+def plot_timeline_xarray_stackable(fig, ax, dataset, x_name, y_name, mean_and_std=True):
+    if mean_and_std:
+        ds_mean = dataset["y_name"].mean(dim="vid")
+        ds_std = dataset["y_name"].std(dim="vid")
+        ax.fill_between(dataset[x_name], (ds_mean - ds_std).values[0], (ds_mean + ds_std).values[0])
+        ds_mean.plot.line(x=x_name, ax=ax, label=f"{y_name} over {x_name}")
+
+    else:
+        dataset[y_name].sum(dim="vid").plot.line(x=x_name, ax=ax, label=f"{y_name} over {x_name}")
+
+    return fig, ax
+
+
+def plot_xarray_vertical_bins(fig, ax, colors, grouped_ds, bins_center, prop, bin_z_width, mean_and_std=False):
+
+    if mean_and_std:
+        ax.barh(-bins_center, grouped_ds.mean()[prop], xerr=grouped_ds.std()[prop], height=bin_z_width-0.001, color="g")
+
+    else:
+        bin_summed_ds = grouped_ds.sum()
+        if isinstance(prop, list):
+            left_pos = np.zeros_like(bins_center)
+            left_neg = np.zeros_like(bins_center)
+            for k in range(len(bins_center)):
+                for p in prop:
+                    if k == 0:
+                        label=p
+                    else:
+                        label=None
+                    if bin_summed_ds[p][k] >= 0:
+                        ax.barh(-bins_center[k], bin_summed_ds[p][k], left=left_pos[k], label=label, height=bin_z_width-0.001, color=colors[p])
+                        left_pos[k] += bin_summed_ds[p][k]
+                    else:
+                        ax.barh(-bins_center[k], bin_summed_ds[p][k], left=left_neg[k], label=label, height=bin_z_width-0.001, color=colors[p])
+                        left_neg[k] += bin_summed_ds[p][k]
+
+        else:
+            ax.barh(-bins_center, bin_summed_ds[p].values)
+
+
+    return fig, ax
+
 
 
 def cnwheat_plot_csv(csv_dirpath):
@@ -659,18 +780,18 @@ def xarray_deep_learning(dataset, mtg, global_state_extracts, global_flow_extrac
         # Global sensitivity analysis at the end of the simulation for now
         # Using a linear regression
 
-        print("[INFO] Performing regression sensitivity on model final global states...")
+        print("     [INFO] Performing regression sensitivity on model final global states...")
         regression_analysis(dataset=dataset, output_path=output_dir, extract_prop=global_state_extracts)
 
     if global_plots:
         # PLOTTING GLOBAL OUTPUTS
-        print("[INFO] Plotting global properties...")
+        print("     [INFO] Plotting global properties...")
         plot_xr(datasets=dataset, selection=list(global_state_extracts.keys()))
         plot_xr(datasets=dataset, selection=list(global_flow_extracts.keys()))
 
     if plot_architecture:
         # PLOTTING ARCHITECTURED VID LEGEND
-        print("[INFO] Plotting topology and coordinate map...")
+        print("     [INFO] Plotting topology and coordinate map...")
 
         custom_colorbar(min(mtg.properties()["index"].values()), max(mtg.properties()["index"].values()),
                         unit="Vid number")
@@ -689,49 +810,25 @@ def xarray_deep_learning(dataset, mtg, global_state_extracts, global_flow_extrac
         # For some reason, dataset should be loaded before umap, and the run() call should be made at the end of
         # the workflow because tkinter locks everything
         # TODO : adapt to sliding windows along roots ?
-        print("[INFO] Performing local organs' physiology clustering...")
+        print("     [INFO] Performing local organs' physiology clustering...")
         pool_locals = {}
         pool_locals.update(state_extracts)
         pool_locals.update(flow_extracts)
         run_analysis(file=dataset, output_path=output_dir, extract_props=pool_locals)
 
 
-def CN_balance_animation(dataset, outputs_dirpath, fps):
-    balance_dict = dict(hexose_exudation={"type": "output", "conversion": 1.},
-                        hexose_uptake_from_soil={"type": "input", "conversion": 1.},
-                        mucilage_secretion={"type": "output", "conversion": 1.},
-                        cells_release={"type": "output", "conversion": 1.},
-                        maintenance_respiration={"type": "output", "conversion": 1 / 6},
-                        hexose_consumption_by_growth={"type": "output", "conversion": 1.},
-                        hexose_diffusion_from_phloem={"type": "input", "conversion": 1.},
-                        hexose_active_production_from_phloem={"type": "input", "conversion": 1.},
-                        sucrose_loading_in_phloem={"type": "output", "conversion": 2},
-                        hexose_mobilization_from_reserve={"type": "input", "conversion": 1.},
-                        hexose_immobilization_as_reserve={"type": "output", "conversion": 1.},
-                        deficit_hexose_root={"type": "output", "conversion": 1.},
-                        AA_synthesis={"type": "output", "conversion": 1.4},
-                        AA_catabolism={"type": "input", "conversion": 1 / 1.4},
-                        N_metabolic_respiration={"type": "output", "conversion": 1 / 6})
-    pie_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="C_hexose_root", balance_dict=balance_dict, fps=fps)
-    balance_dict = dict(diffusion_AA_phloem={"type": "input", "conversion": 1.},
-                        import_AA={"type": "input", "conversion": 1.},
-                        diffusion_AA_soil={"type": "output", "conversion": 1.},
-                        export_AA={"type": "output", "conversion": 1.},
-                        AA_synthesis={"type": "input", "conversion": 1.},
-                        storage_synthesis={"type": "output", "conversion": 65},
-                        storage_catabolism={"type": "input", "conversion": 1 / 65},
-                        AA_catabolism={"type": "output", "conversion": 1.},
-                        amino_acids_consumption_by_growth={"type": "output", "conversion": 1.})
-    pie_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="AA", balance_dict=balance_dict,
-                      input_composition=True, fps=fps)
-    balance_dict = dict(import_Nm={"type": "input", "conversion": 1.},
-                        diffusion_Nm_soil={"type": "output", "conversion": 1.},
-                        diffusion_Nm_xylem={"type": "input", "conversion": 1.},
-                        export_Nm={"type": "output", "conversion": 1.},
-                        AA_synthesis={"type": "output", "conversion": 1.4},
-                        AA_catabolism={"type": "input", "conversion": 1./1.4})
-    pie_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="Nm", balance_dict=balance_dict,
-                      input_composition=True, fps=fps)
+def CN_balance_animation_pipeline(dataset, outputs_dirpath, fps):
+    print("     [INFO] Producing balance animations...")
+    
+    bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="C_hexose_root", balance_dict=balance_dicts["hexose"], fps=fps)
+    
+    bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="AA", balance_dict=balance_dicts["AA"],
+                      fps=fps)
+
+    bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="Nm", balance_dict=balance_dicts["Nm"],
+                      fps=fps)
+    
+    print("     [INFO] Finished")
 
 
 def pie_balance_xarray_animations(dataset, output_dirpath, pool, balance_dict, input_composition=False, fps=15):
@@ -784,6 +881,70 @@ def pie_balance_xarray_animations(dataset, output_dirpath, pool, balance_dict, i
     FFwriter = FFMpegWriter(fps=fps, codec="libx264")
     animation.save(os.path.join(output_dirpath, f"MTG_properties\MTG_properties_raw\{pool}_pies.mp4"), writer=FFwriter, dpi=100)
 
+y_limits = [1e-10 for k in range(100)]
+    
+def bar_balance_xarray_animations(dataset, output_dirpath, pool, balance_dict, fps=15):
+
+    used_dataset = dataset[list(balance_dict.keys())].sum(dim="vid")
+
+    for name, meta in balance_dict.items():
+        if meta["type"] == "output":
+            used_dataset[name] = - used_dataset[name] * meta["conversion"]
+        else:
+            used_dataset[name] = used_dataset[name] * meta["conversion"]
+
+    only_inputs = used_dataset.where(used_dataset > 0., 0.).to_array()
+    only_outputs = - used_dataset.where(used_dataset < 0., 0.).to_array()
+
+    cmap = plt.get_cmap('tab20')
+    colors = cmap(np.linspace(0, 1, len(balance_dict)))
+    prop_colors = {k: c for k, c in zip(balance_dict.keys(), colors)}
+    
+
+    fig, ax = plt.subplots(2, 1)
+
+    fig.set_size_inches(10.5, 18.5)
+
+    
+    def update(time):
+        global y_limits
+        ax[0].clear()
+        to_plot = np.array(only_inputs.sel(t=time)).reshape(1, -1)[0]
+        ds_mean = dataset[pool].mean(dim="vid")
+        ds_std = dataset[pool].std(dim="vid")
+        ax[0].plot([time, time], [0, ds_mean.max()], c="r")
+        ax[0].fill_between(ds_mean.t, (ds_mean-ds_std).values[0], (ds_mean+ds_std).values[0])
+        ds_mean.plot.line(x="t", ax=ax[0], c="b")
+        if not input_composition:
+            ax[0].set_title(f"Input flows : {'{:.2E}'.format(np.sum(to_plot))} mol.s-1")
+
+        ax[1].clear()
+        to_plot = np.array(only_inputs.sel(t=time)).reshape(1, -1)[0]
+        labels = np.array(list(balance_dict.keys()))[to_plot > 0.]
+        to_plot = to_plot[to_plot > 0.]
+        bottom = 0
+        for k in range(len(to_plot)):
+            ax[1].bar("Input flows", to_plot[k], label=labels[k], color=prop_colors[labels[k]], bottom=bottom)
+            bottom += to_plot[k]
+
+        y_limits = y_limits[1:] + [bottom]
+
+        to_plot = np.array(only_outputs.sel(t=time)).reshape(1, -1)[0]
+        labels = np.array(list(balance_dict.keys()))[to_plot > 0.]
+        to_plot = to_plot[to_plot > 0.]
+        bottom = 0
+        for k in range(len(to_plot)):
+            ax[1].bar("Output flows", to_plot[k], label=labels[k], color=prop_colors[labels[k]], bottom=bottom)
+            bottom += to_plot[k]
+        
+        y_limits = y_limits[1:] + [bottom]
+
+        ax[1].set_ylim(0, np.mean(y_limits)*2)
+        ax[1].legend(loc='best', bbox_to_anchor=(0.85, 1.025))
+
+    animation = FuncAnimation(fig, update, frames=only_outputs.t[1:], repeat=False)
+    FFwriter = FFMpegWriter(fps=fps, codec="libx264")
+    animation.save(os.path.join(output_dirpath, f"MTG_properties\MTG_properties_raw\{pool}_bars.mp4"), writer=FFwriter, dpi=100)
 
 def surface_repartition(dataset, output_dirpath, fps):
 
@@ -831,11 +992,36 @@ def apex_zone_contribution(dataset, output_dirpath, apex_zone_length, flow, summ
     fig.savefig(os.path.join(output_dirpath, f"MTG_properties\\MTG_properties_raw\\apex_contribution_{flow}.png"))
     plt.close()
 
+def z_zone_contribution(dataset, output_dirpath, zmin, zmax, flow, mean_proportion=False,
+                                                                    per_surface=False,
+                                                                    per_length=False):
+    fig, ax = plt.subplots(1, 1)
+    fig.set_size_inches(10.5, 10.5)
+    
+    z_zone = filter_dataset(d=dataset, prop="z1", propmin=zmin, propmax=zmax)
+
+    if mean_proportion:
+        z_proportion = z_zone[flow].mean(dim="vid") / dataset[flow].mean(dim="vid")
+    else:
+        z_proportion = z_zone[flow].sum(dim="vid") / dataset[flow].sum(dim="vid")
+
+    length_proportion = z_zone["length"].sum(dim="vid") / dataset["length"].sum(dim="vid")
+    surface_proportion = z_zone["root_exchange_surface"].sum(dim="vid") / dataset["root_exchange_surface"].sum(dim="vid")
+    
+    z_proportion.plot.line(x="t", ax=ax, label=f"{flow} proportion")
+    length_proportion.plot.line(x="t", ax=ax, label="length proportion")
+    surface_proportion.plot.line(x="t", ax=ax, label="surface proportion")
+
+    ax.legend()
+    ax.set_ylabel("proportion")
+
+    fig.savefig(os.path.join(output_dirpath, f"z_zone_contribution_{flow}.png"))
+    plt.close()
 
 def trajectories_plot(dataset, output_dirpath, x, y, color=None, fps=15):
     fig, ax = plt.subplots()
     fig.set_size_inches(10.5, 10.5)
-
+    
     def update(time):
         ax.clear()
         time_step_data = dataset.sel(t=time).dropna(dim="vid")
@@ -859,3 +1045,153 @@ def trajectories_plot(dataset, output_dirpath, x, y, color=None, fps=15):
     FFwriter = FFMpegWriter(fps=15, codec="libx264")
     animation.save(os.path.join(output_dirpath, f"MTG_properties\MTG_properties_raw\{y} f({x}) C {color}_scatter.mp4"),
                    writer=FFwriter, dpi=100)
+
+
+def compare_to_exp_biomass_pipeline(dataset, output_path):
+
+    fig, ax = plt.subplot()
+
+    plot_csv_stackable(fig, ax, "inputs/postprocessing", "Drew_biomass_si.csv", property="total_root_biomass_control", std_prop="total_root_biomass_control_std")
+    plot_csv_stackable(fig, ax, "inputs/postprocessing", "Drew_biomass_si.csv", property="total_root_biomass_patch", std_prop="total_root_biomass_patch_std")
+
+    ax.legend()
+    ax.set_title(f"compare to biomass from Drew 1975")
+    ax.set_xlabel("t (h)")
+    ax.ticklabel_format(axis='y', useOffset=True, style="sci", scilimits=(0, 0))
+    fig.savefig(os.path.join(output_path, "compare_to_exp_biomass.png"))
+    plt.close()
+
+
+def filter_dataset(d, scenarios=[], time=None, tmin=None, tmax=None, vids=[], only_keep=None, prop=None, propmin=None, propmax=None):
+    
+    if len(scenarios) > 0:
+        d = d.where(d.scenario in scenarios)
+
+    if only_keep:
+        d = d[only_keep]
+
+    if time:
+        d = d.where(d.t == time)
+    else:
+        if tmin:
+            d = d.where(d.t >= tmin)
+
+        if tmax:
+            d = d.where(d.t <= tmax)
+
+    if len(vids) > 0:
+        d = d.where(d.vid in vids)
+    
+    if propmin and prop:
+        d = d.where(d[prop] >= propmin)
+    
+    if propmax and prop:
+        d = d.where(d[prop] <= propmax)
+
+    return d
+
+
+def open_and_merge_datasets(scenarios, root_outputs_path = "outputs"):
+    print("         [INFO] Openning xarrays...")
+
+    default_path_in_outputs = "MTG_properties/MTG_properties_raw/merged.nc"
+
+    per_scenario_files = [os.path.join(root_outputs_path, name, default_path_in_outputs) for name in scenarios]
+    
+    if len(per_scenario_files) == 1:
+        dataset = xr.open_dataset(per_scenario_files[0], engine="netcdf4")
+        print("         [INFO] Finished")
+        return dataset
+    else:
+        inidvidual_datasets = [xr.open_dataset(fp) for fp in per_scenario_files]
+        datasets_with_new_dim = []
+        for i, ds in enumerate(inidvidual_datasets):
+            ds_expanded = ds.expand_dims("scenario")
+            ds_expanded["scenario"] = [scenarios[i]]
+            datasets_with_new_dim.append(ds_expanded)
+
+        # Step 3: Combine the datasets along the new dimension
+        merged_dataset = xr.concat(datasets_with_new_dim, dim="scenario")
+        print("         [INFO] Finished")
+        return merged_dataset
+
+
+def pipeline_z_bins_plots(dataset, output_path):
+    fig, ax = plt.subplots(2, 1, figsize=(9, 16))
+
+    dataset = filter_dataset(dataset, only_keep=["z2", "NAE", "hexose_exudation", "AA_synthesis", "amino_acids_consumption_by_growth"], 
+                             tmin=1000, tmax=1024)
+    
+    dataset["z2"] = - dataset["z2"]
+    z_min = dataset["z2"].max()
+    depth_bins = np.arange(0, z_min, 0.01)
+    bins_center = (depth_bins[:-1] + depth_bins[1:]) / 2
+
+    grouped_ds = dataset.groupby_bins("z2", depth_bins)
+
+    plot_xarray_vertical_bins(fig, ax[0], grouped_ds, bins_center=bins_center, prop="NAE", bin_z_width=0.01, mean_and_std=True, tmin=1000, tmax=1024)
+    plot_xarray_vertical_bins(fig, ax[1], grouped_ds, bins_center=bins_center, prop=["hexose_exudation", "AA_synthesis"], right=False, bin_z_width=0.01, time=1000)
+    plot_xarray_vertical_bins(fig, ax[1], grouped_ds, bins_center=bins_center, prop=["amino_acids_consumption_by_growth", "AA_synthesis"], right=True, bin_z_width=0.01, time=1000)
+
+    ax[1].legend()
+    fig.savefig(os.path.join(output_path, "NAE_depth_bins.png"))
+    plt.close()
+
+def pipeline_z_bins_animations(dataset, output_path, prop, metabolite, t_start=1000, t_stop=1048, fps=15, bin_z_width=0.01, mean_and_std=True):
+    print(f"    [INFO] Starting vertical bins animations for {metabolite} balance to explain {prop}")
+    fig, ax = plt.subplots(2, 1, figsize=(9, 16))
+
+    inputs_and_outputs = list(balance_dicts[metabolite].keys())
+    dataset = filter_dataset(dataset, only_keep=inputs_and_outputs + [prop, "z2"], 
+                             tmin=t_start, tmax=t_stop)
+    
+    for name, meta in balance_dicts[metabolite].items():
+        if meta["type"] == "input":
+            dataset[name] *= -meta["conversion"] 
+        elif meta["type"] == "output":
+            dataset[name] *= meta["conversion"] 
+
+    times_to_animate = [int(t) for t in np.arange(t_start, t_stop, 1.) if t in dataset.t.values]
+    
+    dataset["z2"] = - dataset["z2"]
+    z_min = dataset["z2"].max()
+    depth_bins = np.arange(0, z_min, 0.01)
+    bins_center = (depth_bins[:-1] + depth_bins[1:]) / 2
+
+    cmap = plt.get_cmap('tab20')
+    colors = cmap(np.linspace(0, 1, len(inputs_and_outputs)))
+    prop_colors = {k: c for k, c in zip(inputs_and_outputs, colors)}
+
+    def update(time):
+        print(f"        {time - t_start+1} / {t_stop - t_start}", end='\r', flush=True)
+        [a.clear() for a in ax]
+        grouped_ds = dataset.isel(t=time).groupby_bins("z2", depth_bins)
+        plot_xarray_vertical_bins(fig, ax[0], prop_colors, grouped_ds=grouped_ds, bins_center=bins_center, prop=prop, bin_z_width=bin_z_width, mean_and_std=mean_and_std)
+        plot_xarray_vertical_bins(fig, ax[1], prop_colors, grouped_ds=grouped_ds, bins_center=bins_center, prop=inputs_and_outputs, bin_z_width=bin_z_width)
+        
+        ax[0].set_xlim((0, 2.5))
+        ax[0].set_ylim((-0.20, 0.))
+        ax[0].set_ylabel("depth (m)")
+        ax[0].set_xlabel(f"{prop}")
+
+        xlim = max(np.abs(ax[1].get_xlim()))
+        ax[1].set_xlim((-xlim, xlim))
+        ax[1].set_ylim((-0.20, 0.))
+        ax[1].set_ylabel("depth (m)")
+        ax[1].set_xlabel(f"mol of {metabolite}.s-1")
+        ax[1].set_title(f"(left=inputs) Metabolite fluxes for {metabolite} balance (right=outputs)")
+        ax[1].legend()
+        fig.suptitle(f't = {time}', fontsize=16)
+
+    animation = FuncAnimation(fig, update, frames=times_to_animate, repeat=False)
+    FFwriter = FFMpegWriter(fps=fps, codec="libx264")
+    animation.save(os.path.join(output_path, f"{metabolite}vertical_bins_animation.mp4"), writer=FFwriter, dpi=100)
+
+    print("         [INFO] Finished")
+
+class Indicators:
+
+    def Nitrogen_Aquisition_Efficiency(d):
+        nitrogen_net_aquisition = d.import_Nm - d.diffusion_Nm_soil - d.diffusion_Nm_soil_xylem
+        carbon_structural_mass_costs = (d.hexose_consumption_by_growth * 6) + (d.amino_acids_consumption_by_growth * 4.5) + d.maintenance_respiration + d.N_metabolic_respiration
+        return nitrogen_net_aquisition / carbon_structural_mass_costs.where(carbon_structural_mass_costs > 0.)
