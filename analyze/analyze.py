@@ -74,6 +74,7 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         fps=10
         dataset = open_and_merge_datasets(scenarios=scenarios)
         dataset["NAE"] = Indicators.Nitrogen_Aquisition_Efficiency(d=dataset)
+        dataset["Cumulative_NAE"] = Indicators.Cumulative_Nitrogen_Aquisition_Efficiency(d=dataset)
         dataset["Gross_Hexose_Exudation"] = Indicators.Gross_Hexose_Exudation(d=dataset)
         dataset["Gross_AA_Exudation"] = Indicators.Gross_AA_Exudation(d=dataset)
         dataset["Rhizodeposits_CN_Ratio"] = Indicators.Rhizodeposits_CN_Ratio(d=dataset)
@@ -101,22 +102,30 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             # trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="distance_from_tip", y="NAE",
             #                  color=None, fps=fps)
             
-            z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow=zcontrib_flow)
+            #z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow=zcontrib_flow)
             z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow="Gross_Hexose_Exudation")
-            z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow="Gross_AA_Exudation")
-            #z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow="Rhizodeposits_CN_Ratio")
-            #z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow="hexose_exudation")
-            #z_zone_contribution(dataset=scenario_dataset, output_dirpath=raw_dirpath, zmin=-0.08, zmax=-0.012, flow="struct_mass")
-            # z_zone_contribution(dataset=dataset, output_dirpath=outputs_dirpath, zmin=-0.08, zmax=-0.012, flow="NAE", mean_proportion=True)
-            ignore, snapshot_length, snapshot_number = 72, 1, 5
-            prop = "Rhizodeposits_CN_Ratio"
-            mean_and_std = True
-            distance = int((max(scenario_dataset.t.values) - ignore - snapshot_length) / snapshot_number)
-            for snp in range(snapshot_number+1):
-                tstart, tstop = ignore + snp*distance, ignore + snp*distance + snapshot_length
-                pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="hexose", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std)
-                pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="AA", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std)
-                pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="Nm", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std)
+            #z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow="Gross_AA_Exudation")
+            
+            # Snapshots over specific days
+            # ignore, snapshot_length, snapshot_number = 72, 24, 1
+            # props = ["root_exchange_surface", "NAE", "Rhizodeposits_CN_Ratio"]
+            # props = ["root_exchange_surface"]
+            # mean_and_std = [False, True, True]
+            # x_max = [0.03, 2, 200]
+
+            # distance = int((max(scenario_dataset.t.values) - ignore - snapshot_length) / snapshot_number)
+            # for snp in range(1, snapshot_number+1):
+            #     tstart, tstop = ignore + snp*distance, ignore + snp*distance + snapshot_length
+            #     for i, prop in enumerate(props):
+            #         #pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="hexose", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
+            #         #pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="AA", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
+            #         pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="Nm", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
+
+            # Daily means over whole simulation
+            # pipeline_z_bins_animations(dataset=scenario_dataset, prop="Cumulative_NAE", metabolite="hexose", output_path=raw_dirpath, fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24,
+            #                            mean_and_std=True, x_max=2)
+            # pipeline_z_bins_animations(dataset=scenario_dataset, prop="Cumulative_NAE", metabolite="AA", output_path=raw_dirpath, fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24,
+            #                            mean_and_std=True, x_max=45)
 
         #post_color_mtg(os.path.join("outputs", scenario, "MTG_files/root_523.pckl"), os.path.join("outputs", scenario, "MTG_files"), property="Nm")
 
@@ -1168,7 +1177,7 @@ def pipeline_z_bins_plots(dataset, output_path):
     fig.savefig(os.path.join(output_path, "NAE_depth_bins.png"))
     plt.close()
 
-def pipeline_z_bins_animations(dataset, output_path, prop, metabolite, t_start=400, t_stop=450, fps=15, bin_z_width=0.01, mean_and_std=True):
+def pipeline_z_bins_animations(dataset, output_path, prop, metabolite, t_start=400, t_stop=450, fps=15, bin_z_width=0.01, mean_and_std=True, step=1, stride=1, x_max=1):
     print(f"    [INFO] Starting vertical bins animations for {metabolite} balance to explain {prop}")
     fig, ax = plt.subplots(2, 1, figsize=(9, 16))
 
@@ -1182,7 +1191,7 @@ def pipeline_z_bins_animations(dataset, output_path, prop, metabolite, t_start=4
         elif meta["type"] == "output":
             dataset[name] *= meta["conversion"] 
 
-    times_to_animate = [int(t) for t in np.arange(t_start, t_stop, 1.) if t in dataset.t.values]
+    times_to_animate = [int(t) for t in np.arange(t_start, t_stop, 1.) if (t in dataset.t.values and t%step==0)]
     
     z_min = dataset["z2"].max()
     depth_bins = np.arange(0, z_min, 0.01)
@@ -1195,17 +1204,20 @@ def pipeline_z_bins_animations(dataset, output_path, prop, metabolite, t_start=4
     def update(time):
         print(f"        {time - t_start+1} / {t_stop - t_start}", end='\r', flush=True)
         [a.clear() for a in ax]
-        grouped_ds = dataset.isel(t=time).groupby_bins("z2", depth_bins)
+        if stride == 1:
+            grouped_ds = dataset.isel(t=time).groupby_bins("z2", depth_bins)
+        else:
+            grouped_ds = dataset.isel(t=slice(time - int(stride/2), time + int(stride/2))).groupby_bins("z2", depth_bins)
         plot_xarray_vertical_bins(fig, ax[0], prop_colors, grouped_ds=grouped_ds, bins_center=bins_center, prop=prop, bin_z_width=bin_z_width, mean_and_std=mean_and_std)
-        plot_xarray_vertical_bins(fig, ax[1], prop_colors, grouped_ds=grouped_ds, bins_center=bins_center, prop=inputs_and_outputs, bin_z_width=bin_z_width)
+        plot_xarray_vertical_bins(fig, ax[1], prop_colors, grouped_ds=grouped_ds, bins_center=bins_center, prop=inputs_and_outputs, bin_z_width=bin_z_width, mean_and_std=mean_and_std)
         
-        ax[0].set_xlim((0, 0.012))
+        ax[0].set_xlim((0, x_max))
         ax[0].set_ylim((-0.20, 0.))
         ax[0].set_ylabel("depth (m)")
         ax[0].set_xlabel(f"{prop}")
 
         xlim = max(np.abs(ax[1].get_xlim()))
-        xlim = 4e-10
+        xlim = 5e-10
         ax[1].set_xlim((-xlim, xlim))
         ax[1].set_ylim((-0.20, 0.))
         ax[1].set_ylabel("depth (m)")
@@ -1301,8 +1313,19 @@ def post_color_mtg(mtg_file_path, output_dirpath, property):
 class Indicators:
 
     def Nitrogen_Aquisition_Efficiency(d):
+        """
+        Ratio between Net nitrogen acquisition by roots (mol N.s-1) and C consumption for growth and respiration.
+        """
         nitrogen_net_aquisition = d.import_Nm - d.diffusion_Nm_soil - d.diffusion_Nm_soil_xylem
         carbon_structural_mass_costs = (d.hexose_consumption_by_growth * 6) + (d.amino_acids_consumption_by_growth * 5) + d.maintenance_respiration + d.N_metabolic_respiration
+        return nitrogen_net_aquisition / carbon_structural_mass_costs.where(carbon_structural_mass_costs > 0.)
+
+    def Cumulative_Nitrogen_Aquisition_Efficiency(d):
+        """
+        Ratio between Net nitrogen acquisition by roots (mol N.s-1) and C consumption for growth and respiration.
+        """
+        nitrogen_net_aquisition = (d.import_Nm - d.diffusion_Nm_soil - d.diffusion_Nm_soil_xylem).cumsum(dim="t")
+        carbon_structural_mass_costs = ((d.hexose_consumption_by_growth * 6) + (d.amino_acids_consumption_by_growth * 5) + d.maintenance_respiration + d.N_metabolic_respiration).cumsum(dim="t")
         return nitrogen_net_aquisition / carbon_structural_mass_costs.where(carbon_structural_mass_costs > 0.)
 
     def Hexose_Root_Soil_gradient(d):
@@ -1315,10 +1338,16 @@ class Indicators:
         return (d.Nm * d.struct_mass / d.symplasmic_volume) - d.C_mineralN_soil
     
     def Gross_Hexose_Exudation(d):
-        return d.hexose_exudation + d.phloem_hexose_exudation + d.cells_release + d.mucilage_secretion
+        """
+        Net hexose exudation root wise, doesn't account for soil respiration so corresponds to gross rhizodeposition for experimental data
+        """
+        return d.hexose_exudation + d.phloem_hexose_exudation + d.cells_release + d.mucilage_secretion - d.hexose_uptake_from_soil - d.phloem_hexose_uptake_from_soil
     
     def Gross_AA_Exudation(d):
-        return d.diffusion_AA_soil + d.diffusion_AA_soil_xylem
+        """
+        Net amino acid exudation root wise, doesn't account for soil respiration so corresponds to gross rhizodeposition for experimental data
+        """
+        return d.diffusion_AA_soil + d.diffusion_AA_soil_xylem - d.import_AA
     
     def Rhizodeposits_CN_Ratio(d):
         return (d.Gross_Hexose_Exudation * 6 + d.Gross_AA_Exudation * 5) / d.Gross_AA_Exudation *1.4
