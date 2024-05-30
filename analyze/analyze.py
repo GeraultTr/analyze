@@ -6,11 +6,13 @@ from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 # from pygifsicle import optimize
 from openalea.mtg.plantframe import color
+from openalea.mtg import turtle as turt
 from math import floor, ceil, trunc, log10
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, FFMpegWriter
 import xarray as xr
+import pyvista as pv
 from random import random
 
 from log.visualize import plot_mtg, plot_xr, custom_colorbar
@@ -103,7 +105,7 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             #                  color=None, fps=fps)
             
             #z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow=zcontrib_flow)
-            z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow="Gross_Hexose_Exudation")
+            # z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow="Gross_Hexose_Exudation")
             #z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow="Gross_AA_Exudation")
             
             # Snapshots over specific days
@@ -127,19 +129,22 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             # pipeline_z_bins_animations(dataset=scenario_dataset, prop="Cumulative_NAE", metabolite="AA", output_path=raw_dirpath, fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24,
             #                            mean_and_std=True, x_max=45)
 
-        #post_color_mtg(os.path.join("outputs", scenario, "MTG_files/root_523.pckl"), os.path.join("outputs", scenario, "MTG_files"), property="Nm")
+            post_color_mtg(os.path.join("outputs", scenario, "MTG_files/root_347.pckl"), os.path.join("outputs", scenario, "MTG_files"), property="nitrate_transporters_affinity_factor")
+            post_color_mtg(os.path.join("outputs", scenario, "MTG_files/root_347.pckl"),
+                           os.path.join("outputs", scenario, "MTG_files"),
+                           property="Nm")
 
         # Then scenario comparisions
         comparisions_dirpath = "outputs/comparisions"
 
-        ax_zcontrib.legend()
-        ax_zcontrib.set_ylabel("proportion")
-        ax_zcontrib.set_title("Contributions of the patch zones relative to the whole root system")
-
-        fig_zcontrib.savefig(os.path.join(comparisions_dirpath, f"z_zone_contribution_{zcontrib_flow}.png"))
-        plt.close()
-        
-        pipeline_compare_to_experimental_data(dataset=dataset, output_path=comparisions_dirpath)
+        # ax_zcontrib.legend()
+        # ax_zcontrib.set_ylabel("proportion")
+        # ax_zcontrib.set_title("Contributions of the patch zones relative to the whole root system")
+        #
+        # fig_zcontrib.savefig(os.path.join(comparisions_dirpath, f"z_zone_contribution_{zcontrib_flow}.png"))
+        # plt.close()
+        #
+        # pipeline_compare_to_experimental_data(dataset=dataset, output_path=comparisions_dirpath)
 
         print("     [INFO] Finished plotting raw logs")
 
@@ -1278,36 +1283,102 @@ def pipeline_compare_to_experimental_data(dataset, output_path):
 
     fig.savefig(os.path.join(output_path, "biomasses comparision.png"))
     plt.close()
-    
 
-def post_color_mtg(mtg_file_path, output_dirpath, property):
+def log_mtg_coordinates(g):
+    def root_visitor(g, v, turtle, gravitropism_coefficient=0.06):
+        n = g.node(v)
+
+        # For displaying the radius or length X times larger than in reality, we can define a zoom factor:
+        zoom_factor = 1.
+        # We look at the geometrical properties already defined within the root element:
+        radius = n.radius * zoom_factor
+        length = n.length * zoom_factor
+        angle_down = n.angle_down
+        angle_roll = n.angle_roll
+
+        # We get the x,y,z coordinates from the beginning of the root segment, before the turtle moves:
+        position1 = turtle.getPosition()
+        n.x1 = position1[0] / zoom_factor
+        n.y1 = position1[1] / zoom_factor
+        n.z1 = position1[2] / zoom_factor
+
+        # The direction of the turtle is changed:
+        turtle.down(angle_down)
+        turtle.rollL(angle_roll)
+
+        # Tropism is then taken into account:
+        # diameter = 2 * n.radius * zoom_factor
+        # elong = n.length * zoom_factor
+        # alpha = tropism_intensity * diameter * elong
+        # turtle.rollToVert(alpha, tropism_direction)
+        # if g.edge_type(v)=='+':
+        # diameter = 2 * n.radius * zoom_factor
+        # elong = n.length * zoom_factor
+        # alpha = tropism_intensity * diameter * elong
+        turtle.elasticity = gravitropism_coefficient * (n.original_radius / g.node(1).original_radius)
+        turtle.tropism = (0, 0, -1)
+
+        # The turtle is moved:
+        turtle.setId(v)
+        if n.type != "Root_nodule":
+            # We define the radius of the cylinder to be displayed:
+            turtle.setWidth(radius)
+            # We move the turtle by the length of the root segment:
+            turtle.F(length)
+        else:  # SPECIAL CASE FOR NODULES
+            # We define the radius of the sphere to be displayed:
+            turtle.setWidth(radius)
+            # We "move" the turtle, but not according to the length (?):
+            turtle.F()
+
+        # We get the x,y,z coordinates from the end of the root segment, after the turtle has moved:
+        position2 = turtle.getPosition()
+        n.x2 = position2[0] / zoom_factor
+        n.y2 = position2[1] / zoom_factor
+        n.z2 = position2[2] / zoom_factor
+
+    # We initialize a turtle in PlantGL:
+
+    turtle = turt.PglTurtle()
+    # We make the graph upside down:
+    turtle.down(180)
+    # We initialize the scene with the MTG g:
+    turt.TurtleFrame(g, visitor=root_visitor, turtle=turtle, gc=False)
+
+def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen=False, flow_property=False):
     from log.visualize import plot_mtg_alt
     with open(mtg_file_path, "rb") as f:
-        g = pickle.open(f)
-
+        g = pickle.load(f)
+    log_mtg_coordinates(g)
     props = g.properties()
     
     sizes = {"landscape": [1920, 1080], "portrait": [1088, 1920], "square": [1080, 1080],
                 "small_height": [960, 1280]}
-    
-    pv.start_xvfb()
 
-    plotter = pv.Plotter(off_screen=not self.echo, window_size=sizes["portrait"], lighting="three lights")
+    if recording_off_screen:
+        pv.start_xvfb()
+
+    plotter = pv.Plotter(off_screen=not recording_off_screen, window_size=sizes["portrait"], lighting="three lights")
     plotter.set_background("brown")
-    plotter.camera_position = [(0.40610826249000453, 0.05998559870235731, 0.23104458533393235),
-                                (-0.018207483487647478, -0.01240015490351695, -0.11434395584056384),
-                                (-0.6256947390605705, -0.04745865688095235, 0.7786229956782554)]
+    step_back_coefficient = 0.5
+    camera_coordinates = (step_back_coefficient, 0., 0.)
+    move_up_coefficient = 0.1
+    horizontal_aiming = (0., 0., 1.)
+    collar_position = (0., 0., -move_up_coefficient)
+    plotter.camera_position = [camera_coordinates,
+                                    collar_position,
+                                    horizontal_aiming]
 
     plotter.show(interactive_update=True)
 
     # Then add initial states of plotted compartments
-    root_system_mesh, color_property = plot_mtg_alt(props, cmap_property=property)
+    root_system_mesh, color_property = plot_mtg_alt(g, cmap_property=property, flow_property=flow_property)
     if 0. in color_property:
                 color_property.remove(0.)
-    plotter.add_mesh(root_system_mesh, cmap="jet", clim=[min(color_property), max(color_property)], show_edges=False, log_scale=True)
+    plotter.add_mesh(root_system_mesh, cmap="jet", clim=[min(color_property), max(color_property)], show_edges=False, log_scale=False)
     plotter.add_text(f"MTG displaying {property} at t=", position="upper_left")
 
-    plotter.screenshot(os.path.join(output_dirpath, 'plot_snapshot.png'))
+    plotter.screenshot(os.path.join(output_dirpath, f'{property}_plot_snapshot.png'))
 
 
 class Indicators:
