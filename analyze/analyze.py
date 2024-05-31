@@ -51,7 +51,9 @@ balance_dicts = {"hexose": dict(hexose_exudation={"type": "output", "conversion"
                     diffusion_Nm_xylem={"type": "input", "conversion": 1.},
                     export_Nm={"type": "output", "conversion": 1.},
                     AA_synthesis={"type": "output", "conversion": 1.4},
-                    AA_catabolism={"type": "input", "conversion": 1./1.4})
+                    AA_catabolism={"type": "input", "conversion": 1./1.4}),
+                "rhizodeposits": dict(Gross_Hexose_Exudation={"type": "output", "conversion": 1.},
+                    Gross_AA_Exudation={"type": "output", "conversion": 1.})
                  }
 
 
@@ -60,10 +62,11 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
     # TODO if not available, return not performed
     print("[INFO] Starting data analysis")
     if on_sums:
-        print("     [INFO] Producing 2D plots from summed and averaged properties")
-        plot_csv(csv_dirpath=os.path.join(outputs_dirpath, "MTG_properties/MTG_properties_summed"),
-                 csv_name="plant_scale_properties.csv", properties=target_properties)
-        print("     [INFO] Finished 2d plots")
+        for scenario in scenarios:
+            print("     [INFO] Producing 2D plots from summed and averaged properties")
+            plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_summed"),
+                    csv_name="plant_scale_properties.csv", properties=target_properties)
+            print("     [INFO] Finished 2d plots")
     if on_raw_logs:
         print("     [INFO] Starting deep learning analysis on raw logs...")
         from analyze.workflow.STM_analysis.main_workflow import run_analysis
@@ -73,12 +76,15 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
     if animate_raw_logs:
         print("     [INFO] Starting plot production from raw logs...")
         
-        fps=10
-        dataset = open_and_merge_datasets(scenarios=scenarios)
+        fps=5
+        dataset = open_and_merge_datasets(scenarios=scenarios, root_outputs_path=outputs_dirpath)
         dataset["NAE"] = Indicators.Nitrogen_Aquisition_Efficiency(d=dataset)
         dataset["Cumulative_NAE"] = Indicators.Cumulative_Nitrogen_Aquisition_Efficiency(d=dataset)
+        dataset["Cumulative_Nitrogen_Uptake"] = Indicators.Cumulative_Nitrogen_Uptake(d=dataset)
+        dataset["Cumulative_Carbon_Costs"] = Indicators.Cumulative_Carbon_Costs(d=dataset)
         dataset["Gross_Hexose_Exudation"] = Indicators.Gross_Hexose_Exudation(d=dataset)
         dataset["Gross_AA_Exudation"] = Indicators.Gross_AA_Exudation(d=dataset)
+        dataset["Gross_Rhizodeposition"] = Indicators.Gross_Rhizodeposition(d=dataset)
         dataset["Rhizodeposits_CN_Ratio"] = Indicators.Rhizodeposits_CN_Ratio(d=dataset)
         dataset["z2"] = - dataset["z2"]
 
@@ -90,7 +96,7 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
 
         # First individual analyses
         for scenario in scenarios:
-            raw_dirpath = os.path.join("outputs", scenario, "MTG_properties/MTG_properties_raw/")
+            raw_dirpath = os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_raw/")
             if len(scenarios) > 1:
                 scenario_dataset = filter_dataset(dataset, scenario=scenario)
             else:
@@ -123,19 +129,28 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             #         #pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="AA", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
             #         pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="Nm", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
 
-            # Daily means over whole simulation
-            # pipeline_z_bins_animations(dataset=scenario_dataset, prop="Cumulative_NAE", metabolite="hexose", output_path=raw_dirpath, fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24,
-            #                            mean_and_std=True, x_max=2)
-            # pipeline_z_bins_animations(dataset=scenario_dataset, prop="Cumulative_NAE", metabolite="AA", output_path=raw_dirpath, fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24,
-            #                            mean_and_std=True, x_max=45)
-
-            post_color_mtg(os.path.join("outputs", scenario, "MTG_files/root_347.pckl"), os.path.join("outputs", scenario, "MTG_files"), property="nitrate_transporters_affinity_factor")
-            post_color_mtg(os.path.join("outputs", scenario, "MTG_files/root_347.pckl"),
-                           os.path.join("outputs", scenario, "MTG_files"),
-                           property="Nm")
+            # post_color_mtg(os.path.join(outputs_dirpath, scenario, "MTG_files/root_347.pckl"), os.path.join("outputs", scenario, "MTG_files"), property="nitrate_transporters_affinity_factor")
+            # post_color_mtg(os.path.join(outputs_dirpath, scenario, "MTG_files/root_347.pckl"),
+            #                os.path.join(outputs_dirpath, scenario, "MTG_files"),
+            #                property="Nm")
 
         # Then scenario comparisions
-        comparisions_dirpath = "outputs/comparisions"
+        comparisions_dirpath = os.path.join(outputs_dirpath, "comparisions")
+        # #!!!!! R1 !!!!!
+        # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="root_exchange_surface", metabolic_flow="import_Nm", 
+        #                                    fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=False, x_max_down=1, x_max_up=3e-8)
+
+        # #!!!!! R2 !!!!!
+        # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="length", metabolic_flow="import_Nm", 
+        #                                     fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=False, x_max_down=20, special_case=True)
+
+        # #!!!!! R3 !!!!!
+        # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="struct_mass", metabolic_flow="Gross_Rhizodeposition", 
+        #                                     fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=False, x_max_down=1, x_max_up=5e-9)
+        
+        # #!!!!! R4 !!!!!
+        # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="struct_mass", metabolic_flow="Rhizodeposits_CN_Ratio", 
+        #                                     fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=True, x_max_down=1, x_max_up=250)
 
         # ax_zcontrib.legend()
         # ax_zcontrib.set_ylabel("proportion")
@@ -144,7 +159,7 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         # fig_zcontrib.savefig(os.path.join(comparisions_dirpath, f"z_zone_contribution_{zcontrib_flow}.png"))
         # plt.close()
         #
-        # pipeline_compare_to_experimental_data(dataset=dataset, output_path=comparisions_dirpath)
+        pipeline_compare_to_experimental_data(dataset=dataset, output_path=comparisions_dirpath)
 
         print("     [INFO] Finished plotting raw logs")
 
@@ -217,9 +232,9 @@ def plot_csv_stackable(fig, ax, csv_dirpath, csv_name, property, std_prop=None, 
         
         if std_prop:
             ax.errorbar(log["t"], log[property], yerr=log[std_prop], fmt=".", color='black', linestyle='')
-            ax.scatter(log["t"], log[property], label=property, s=20)
+            ax.scatter(log["t"], log[property], label=property, s=30)
         else:
-            ax.scatter(log["t"], log[property], label=property, s=20)
+            ax.scatter(log["t"], log[property], label=property, s=30)
     else:
         ax.plot(log["t"], log[property], label=property)
 
@@ -242,7 +257,7 @@ def plot_timeline_xarray_stackable(fig, ax, dataset, x_name, y_name, mean_and_st
 def plot_xarray_vertical_bins(fig, ax, colors, grouped_ds, bins_center, prop, bin_z_width, mean_and_std=False):
 
     if mean_and_std:
-        ax.barh(-bins_center, grouped_ds.mean()[prop], xerr=grouped_ds.std()[prop], height=bin_z_width-0.001, color="g")
+        ax.barh(-bins_center, grouped_ds.mean()[prop].values, height=bin_z_width-0.001, color="g")
 
     else:
         bin_summed_ds = grouped_ds.sum()
@@ -267,6 +282,23 @@ def plot_xarray_vertical_bins(fig, ax, colors, grouped_ds, bins_center, prop, bi
 
     return fig, ax
 
+def plot_compare_xarray_vertical_bins(fig, ax, grouped_ds, bins_center, prop, bin_z_width, colors, mean_and_std=False, special_case=False):
+    z_centering = - 0.005
+    for name, scenario_groups in grouped_ds.items():
+        if special_case:
+            ds = scenario_groups.sum()
+            ds["Nitrate_Carbon_Costs"] = ds["Cumulative_Carbon_Costs"] / ds["Cumulative_Nitrogen_Uptake"].where(ds["Cumulative_Nitrogen_Uptake"] > 0.)
+            ax.barh(-(bins_center+z_centering), ds["Nitrate_Carbon_Costs"].values, height=bin_z_width-0.001, label=name, alpha=1, color=colors[name])
+            
+        else:
+            if mean_and_std:
+                ax.barh(-(bins_center+z_centering), scenario_groups.mean()[prop], height=bin_z_width-0.001, label=name, alpha=1, color=colors[name])
+
+            else:
+                bin_summed_ds = scenario_groups.sum()
+                ax.barh(-(bins_center+z_centering), bin_summed_ds[prop].values, height=bin_z_width-0.001, label=name, alpha=1, color=colors[name])
+        z_centering += 0.01
+    return fig, ax
 
 
 def cnwheat_plot_csv(csv_dirpath):
@@ -1182,7 +1214,7 @@ def pipeline_z_bins_plots(dataset, output_path):
     fig.savefig(os.path.join(output_path, "NAE_depth_bins.png"))
     plt.close()
 
-def pipeline_z_bins_animations(dataset, output_path, prop, metabolite, t_start=400, t_stop=450, fps=15, bin_z_width=0.01, mean_and_std=True, step=1, stride=1, x_max=1):
+def pipeline_z_bins_animations(dataset, output_path, prop, metabolite, t_start=400, t_stop=450, fps=15, bin_z_width=0.01, mean_and_std=True, step=1, stride=1, x_min=0, x_max=1):
     print(f"    [INFO] Starting vertical bins animations for {metabolite} balance to explain {prop}")
     fig, ax = plt.subplots(2, 1, figsize=(9, 16))
 
@@ -1216,24 +1248,86 @@ def pipeline_z_bins_animations(dataset, output_path, prop, metabolite, t_start=4
         plot_xarray_vertical_bins(fig, ax[0], prop_colors, grouped_ds=grouped_ds, bins_center=bins_center, prop=prop, bin_z_width=bin_z_width, mean_and_std=mean_and_std)
         plot_xarray_vertical_bins(fig, ax[1], prop_colors, grouped_ds=grouped_ds, bins_center=bins_center, prop=inputs_and_outputs, bin_z_width=bin_z_width, mean_and_std=mean_and_std)
         
-        ax[0].set_xlim((0, x_max))
+        fontsize = 15
+
+        ax[0].set_xlim((x_min, x_max))
         ax[0].set_ylim((-0.20, 0.))
-        ax[0].set_ylabel("depth (m)")
-        ax[0].set_xlabel(f"{prop}")
+        ax[0].set_ylabel("depth (m)", fontsize=fontsize)
+        ax[0].set_xlabel(f"{prop}", fontsize=fontsize)
 
         xlim = max(np.abs(ax[1].get_xlim()))
         xlim = 5e-10
-        ax[1].set_xlim((-xlim, xlim))
+        ax[1].set_xlim((0, x_max))
         ax[1].set_ylim((-0.20, 0.))
-        ax[1].set_ylabel("depth (m)")
-        ax[1].set_xlabel(f"mol of {metabolite}.s-1")
-        ax[1].set_title(f"(left=inputs) Metabolite fluxes for {metabolite} balance (right=outputs)")
-        ax[1].legend()
+        ax[1].set_ylabel("depth (m)", fontsize=fontsize)
+        ax[1].set_xlabel(f"mol of {metabolite}.s-1", fontsize=fontsize)
+        ax[1].set_title(f"(left=inputs) Metabolite fluxes for {metabolite} balance (right=outputs)", fontsize=fontsize)
+        ax[1].legend(loc="lower right", fontsize=fontsize)
         fig.suptitle(f't = {time}', fontsize=16)
 
     animation = FuncAnimation(fig, update, frames=times_to_animate, repeat=False)
     FFwriter = FFMpegWriter(fps=fps, codec="mpeg4", bitrate=5000)
     animation.save(os.path.join(output_path, f"{prop}_and_{metabolite}_{t_start}_to_{t_stop}_vertical_bins_animation.mp4"), writer=FFwriter, dpi=100)
+
+    print("         [INFO] Finished")
+
+
+def pipeline_compare_z_bins_animations(dataset, scenarios, output_path, prop, metabolic_flow="import_Nm", t_start=400, t_stop=450, fps=15, bin_z_width=0.01, mean_and_std=True, step=1, stride=1, x_max_down=1, x_max_up=1, special_case=False):
+    print(f"    [INFO] Starting vertical bins animations for {metabolic_flow} balance to explain {prop}")
+    fig, ax = plt.subplots(2, 1, figsize=(9, 16))
+    
+    
+    filter_prop = None
+    propmin = None
+    propmax = None
+
+    # if special_case:
+    #     filter_prop = "distance_from_tip"
+    #     propmax = 0.01
+
+    scenarios_names_translator ={"Drew_1975_low":"Uniform 0.01 mM", "Drew_1975_1":"0.01 mM + 1 mM patch from 8 to 12 cm"}
+    colors = {"Uniform 0.01 mM": "silver", "0.01 mM + 1 mM patch from 8 to 12 cm":"limegreen"}
+    per_scenario_data = {scenarios_names_translator[scenario]: filter_dataset(dataset, scenario=scenario, only_keep=[prop, metabolic_flow, "z2", "Cumulative_Nitrogen_Uptake", "Cumulative_Carbon_Costs", "distance_from_tip", "struct_mass", "Rhizodeposits_CN_Ratio"], 
+                        tmin=t_start, tmax=t_stop, prop=filter_prop, propmin=propmin, propmax=propmax) for scenario in scenarios}
+
+    times_to_animate = [int(t) for t in np.arange(t_start, t_stop, 1.) if (t in dataset.t.values and t%step==0)]
+    
+    z_min = dataset["z2"].max()
+    depth_bins = np.arange(0, z_min, 0.02)
+    bins_center = (depth_bins[:-1] + depth_bins[1:]) / 2
+
+    def update(time):
+        print(f"        {time - t_start+1} / {t_stop - t_start}", end='\r', flush=True)
+        [a.clear() for a in ax]
+        if stride == 1:
+            grouped_ds = {name: ds.isel(t=time).groupby_bins("z2", depth_bins) for name, ds in per_scenario_data.items()}
+        else:
+            grouped_ds = {name: ds.isel(t=slice(time - int(stride/2), time + int(stride/2))).groupby_bins("z2", depth_bins) for name, ds in per_scenario_data.items()}
+
+        plot_compare_xarray_vertical_bins(fig, ax[1], grouped_ds=grouped_ds, bins_center=bins_center, prop=prop, bin_z_width=bin_z_width, colors=colors, mean_and_std=mean_and_std, special_case=special_case)
+        plot_compare_xarray_vertical_bins(fig, ax[0], grouped_ds=grouped_ds, bins_center=bins_center, prop=metabolic_flow, bin_z_width=bin_z_width, colors=colors, mean_and_std=mean_and_std)
+        
+        fontsize = 15
+
+        ax[1].set_xlim((0, x_max_down))
+        # ax[1].set_xscale('log')
+        ax[1].set_ylim((-z_min, 0.))
+        ax[1].set_ylabel("depth (m)", fontsize=fontsize+5)
+        ax[1].set_xlabel(f"{prop} (m2)", fontsize=fontsize+5)
+        #ax[1].set_title(f"Comparisions between homogeneous and patchy concentrations", fontsize=fontsize)
+        ax[1].legend(loc="lower right", fontsize=fontsize)
+
+        ax[0].set_xlim((0, x_max_up))
+        ax[0].set_ylim((-z_min, 0.))
+        ax[0].set_ylabel("depth (m)", fontsize=fontsize+5)
+        ax[0].set_xlabel(f"{metabolic_flow} (mol.s-1)", fontsize=fontsize+5)
+        #ax[0].set_title(f"Comparisions of {metabolic_flow} between homogeneous and patchy concentrations", fontsize=fontsize)
+        ax[0].legend(loc="lower right", fontsize=fontsize)
+        fig.suptitle(f'day = {int(time/24)}', fontsize=fontsize + 10)
+
+    animation = FuncAnimation(fig, update, frames=times_to_animate, repeat=False)
+    FFwriter = FFMpegWriter(fps=fps, codec="mpeg4", bitrate=5000)
+    animation.save(os.path.join(output_path, f"{prop}_and_{metabolic_flow}_{t_start}_to_{t_stop}_vertical_bins_animation.mp4"), writer=FFwriter, dpi=100)
 
     print("         [INFO] Finished")
 
@@ -1399,6 +1493,13 @@ class Indicators:
         carbon_structural_mass_costs = ((d.hexose_consumption_by_growth * 6) + (d.amino_acids_consumption_by_growth * 5) + d.maintenance_respiration + d.N_metabolic_respiration).cumsum(dim="t")
         return nitrogen_net_aquisition / carbon_structural_mass_costs.where(carbon_structural_mass_costs > 0.)
 
+    def Cumulative_Carbon_Costs(d):
+        return ((d.hexose_consumption_by_growth * 6) + (d.amino_acids_consumption_by_growth * 5) + d.maintenance_respiration + d.N_metabolic_respiration).cumsum(dim="t")
+    
+    def Cumulative_Nitrogen_Uptake(d):
+        return (d.import_Nm - d.diffusion_Nm_soil - d.diffusion_Nm_soil_xylem).cumsum(dim="t")
+    
+
     def Hexose_Root_Soil_gradient(d):
         return (d.C_hexose_root * d.struct_mass / d.symplasmic_volume) - d.C_hexose_soil
     
@@ -1420,5 +1521,8 @@ class Indicators:
         """
         return d.diffusion_AA_soil + d.diffusion_AA_soil_xylem - d.import_AA
     
+    def Gross_Rhizodeposition(d):
+        return d.Gross_Hexose_Exudation + d.Gross_AA_Exudation
+
     def Rhizodeposits_CN_Ratio(d):
-        return (d.Gross_Hexose_Exudation * 6 + d.Gross_AA_Exudation * 5) / d.Gross_AA_Exudation *1.4
+        return (d.Gross_Hexose_Exudation * 6 + d.Gross_AA_Exudation * 5) / (d.Gross_AA_Exudation.where(d.Gross_AA_Exudation > 0.) *1.4)
