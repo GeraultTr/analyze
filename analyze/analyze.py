@@ -86,6 +86,7 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         dataset["Gross_AA_Exudation"] = Indicators.Gross_AA_Exudation(d=dataset)
         dataset["Gross_Rhizodeposition"] = Indicators.Gross_Rhizodeposition(d=dataset)
         dataset["Rhizodeposits_CN_Ratio"] = Indicators.Rhizodeposits_CN_Ratio(d=dataset)
+        dataset["CN_Ratio_Cumulated_Rhizodeposition"] = Indicators.CN_Ratio_Cumulated_Rhizodeposition(d=dataset)
         dataset["z2"] = - dataset["z2"]
 
 
@@ -106,8 +107,8 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
 
             #CN_balance_animation_pipeline(dataset=dataset, outputs_dirpath=outputs_dirpath, fps=fps)
             #surface_repartition(dataset, output_dirpath=outputs_dirpath, fps=fps)
-            apex_zone_contribution(scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=0.02,
-                                   flow="import_Nm", summed_input="hexose_diffusion_from_phloem", color_prop="Nm")
+            # apex_zone_contribution(scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=0.02,
+            #                        flow="import_Nm", summed_input="hexose_diffusion_from_phloem", color_prop="Nm")
             # apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
             #                        flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="C_hexose_root")
             # trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="distance_from_tip", y="NAE",
@@ -132,8 +133,10 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             #         #pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="AA", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
             #         pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="Nm", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
 
-            # post_color_mtg(os.path.join(mtg_dirpath, "root_1237.pckl"), mtg_dirpath, property="import_Nm", 
-            #                recording_off_screen=False, background_color="grey")
+            # post_color_mtg(os.path.join(mtg_dirpath, "root_1239.pckl"), mtg_dirpath, property="import_Nm", flow_property=True, 
+            #                recording_off_screen=False, background_color="brown", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=True)
+            post_color_mtg(os.path.join(mtg_dirpath, "root_1527.pckl"), mtg_dirpath, property="import_Nm", flow_property=True, 
+                           recording_off_screen=False, background_color="white", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=True)
 
 
 
@@ -141,7 +144,7 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         comparisions_dirpath = os.path.join(outputs_dirpath, "comparisions")
         # #!!!!! R1 !!!!!
         # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="root_exchange_surface", metabolic_flow="import_Nm", 
-        #                                    fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=False, x_max_down=1, x_max_up=3e-8)
+        #                                    fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=False, x_max_down=2.5, x_max_up=4e-8)
 
         # #!!!!! R2 !!!!!
         # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="length", metabolic_flow="import_Nm", 
@@ -152,9 +155,14 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         #                                     fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=False, x_max_down=1, x_max_up=5e-9)
         
         # #!!!!! R4 !!!!!
-        # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="struct_mass", metabolic_flow="Rhizodeposits_CN_Ratio", 
-        #                                     fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=True, x_max_down=1, x_max_up=250)
+        # stride = 24
+        # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="struct_mass", metabolic_flow="CN_Ratio_Cumulated_Rhizodeposition", 
+        #                                     fps=fps, t_start=int(stride/2), t_stop=max(scenario_dataset.t.values)-int(stride/2), step=24, stride=stride, mean_and_std=True, x_max_down=1, x_max_up=250)
 
+        # screenshot_time = 1152
+        # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="struct_mass", metabolic_flow="CN_Ratio_Cumulated_Rhizodeposition", 
+        #                                     fps=fps, t_start=screenshot_time, t_stop=screenshot_time, step=1, stride=1, mean_and_std=True, x_max_down=1, x_max_up=200, screenshot=True)
+        
         # ax_zcontrib.legend()
         # ax_zcontrib.set_ylabel("proportion")
         # ax_zcontrib.set_title("Contributions of the patch zones relative to the whole root system")
@@ -1275,7 +1283,7 @@ def pipeline_z_bins_animations(dataset, output_path, prop, metabolite, t_start=4
     print("         [INFO] Finished")
 
 
-def pipeline_compare_z_bins_animations(dataset, scenarios, output_path, prop, metabolic_flow="import_Nm", t_start=400, t_stop=450, fps=15, bin_z_width=0.01, mean_and_std=True, step=1, stride=1, x_max_down=1, x_max_up=1, special_case=False):
+def pipeline_compare_z_bins_animations(dataset, scenarios, output_path, prop, metabolic_flow="import_Nm", t_start=400, t_stop=450, fps=15, bin_z_width=0.01, mean_and_std=True, step=1, stride=1, x_max_down=1, x_max_up=1, special_case=False, screenshot=False):
     print(f"    [INFO] Starting vertical bins animations for {metabolic_flow} balance to explain {prop}")
     fig, ax = plt.subplots(2, 1, figsize=(9, 16))
     
@@ -1320,7 +1328,8 @@ def pipeline_compare_z_bins_animations(dataset, scenarios, output_path, prop, me
         #ax[1].set_title(f"Comparisions between homogeneous and patchy concentrations", fontsize=fontsize)
         ax[1].legend(loc="lower right", fontsize=fontsize)
 
-        ax[0].set_xlim((0, x_max_up))
+        ax[0].set_xlim((0.1, x_max_up))
+        ax[0].set_xscale('log')
         ax[0].set_ylim((-z_min, 0.))
         ax[0].set_ylabel("depth (m)", fontsize=fontsize+5)
         ax[0].set_xlabel(f"{metabolic_flow} (mol.s-1)", fontsize=fontsize+5)
@@ -1328,9 +1337,14 @@ def pipeline_compare_z_bins_animations(dataset, scenarios, output_path, prop, me
         ax[0].legend(loc="lower right", fontsize=fontsize)
         fig.suptitle(f'day = {int(time/24)}', fontsize=fontsize + 10)
 
-    animation = FuncAnimation(fig, update, frames=times_to_animate, repeat=False)
-    FFwriter = FFMpegWriter(fps=fps, codec="mpeg4", bitrate=5000)
-    animation.save(os.path.join(output_path, f"{prop}_and_{metabolic_flow}_{t_start}_to_{t_stop}_vertical_bins_animation.mp4"), writer=FFwriter, dpi=100)
+    if not screenshot:
+        animation = FuncAnimation(fig, update, frames=times_to_animate, repeat=False)
+        FFwriter = FFMpegWriter(fps=fps, codec="mpeg4", bitrate=5000)
+        animation.save(os.path.join(output_path, f"{prop}_and_{metabolic_flow}_{t_start}_to_{t_stop}_vertical_bins_animation.mp4"), writer=FFwriter, dpi=100)
+
+    else:
+        update(t_start)
+        fig.savefig(os.path.join(output_path, f"Cumulated_Rhizodeposits_CN_Ratio_at_{t_start}.png"))
 
     print("         [INFO] Finished")
 
@@ -1338,17 +1352,21 @@ def pipeline_compare_z_bins_animations(dataset, scenarios, output_path, prop, me
 def pipeline_compare_to_experimental_data(dataset, output_path):
     fig, ax = plt.subplots(3, 1, figsize=(9, 16))
 
-    thermal_time_shift = 8 / 17
+    def thermal_time_shift(d):
+        times = d.t
+        # Relationship derived from Fischer 1966 data
+        time_shift =  (1.28e-6*(times**2) -5.30e-4*times + 8.05) / 17
+        return (times * time_shift).values
 
     # Compare total biomasses
     plot_csv_stackable(fig, ax[0], csv_dirpath="inputs/postprocessing", csv_name="Drew_biomass_si.csv", 
                        property="total_root_biomass_control", std_prop="total_root_biomass_control_std")
     control_dataset = filter_dataset(dataset, scenario="Drew_1975_low", only_keep=["struct_mass", "import_Nm", "z2"])
-    ax[0].plot((thermal_time_shift * control_dataset.t).values, control_dataset["struct_mass"].sum(dim="vid").values[0], label="Simulated total root biomass control")
+    ax[0].plot(thermal_time_shift(control_dataset), control_dataset["struct_mass"].sum(dim="vid").values[0], label="Simulated total root biomass control")
     plot_csv_stackable(fig, ax[1], csv_dirpath="inputs/postprocessing", csv_name="Drew_biomass_si.csv", 
                        property="patch_root_biomass_control", std_prop="patch_root_biomass_control_std")
     control_dataset_patch_zone = filter_dataset(control_dataset, prop="z2", propmin=0.08, propmax=0.12)
-    ax[1].plot((thermal_time_shift * control_dataset_patch_zone.t).values, control_dataset_patch_zone["struct_mass"].sum(dim="vid").values[0], label="Simulated patch zone root biomass")
+    ax[1].plot(thermal_time_shift(control_dataset_patch_zone), control_dataset_patch_zone["struct_mass"].sum(dim="vid").values[0], label="Simulated 8-14 cm root biomass control")
     
     
 
@@ -1356,24 +1374,32 @@ def pipeline_compare_to_experimental_data(dataset, output_path):
     plot_csv_stackable(fig, ax[0], csv_dirpath="inputs/postprocessing", csv_name="Drew_biomass_si.csv", 
                        property="total_root_biomass_patch", std_prop="total_root_biomass_patch_std")
     test_dataset = filter_dataset(dataset, scenario="Drew_1975_1", only_keep=["struct_mass", "import_Nm", "z2"])
-    ax[0].plot((thermal_time_shift * test_dataset.t).values, test_dataset["struct_mass"].sum(dim="vid").values[0], label="Simulated total root biomass with patch")
+    ax[0].plot(thermal_time_shift(test_dataset), test_dataset["struct_mass"].sum(dim="vid").values[0], label="Simulated total root biomass with patch")
     plot_csv_stackable(fig, ax[1], csv_dirpath="inputs/postprocessing", csv_name="Drew_biomass_si.csv", 
                        property="patch_root_biomass_patch", std_prop="patch_root_biomass_patch_std")
     test_dataset_patch_zone = filter_dataset(test_dataset, prop="z2", propmin=0.08, propmax=0.12)
-    ax[1].plot((thermal_time_shift * test_dataset_patch_zone.t).values, test_dataset_patch_zone["struct_mass"].sum(dim="vid").values[0], label="Simulated patch zone root biomass with addition")
+    ax[1].plot(thermal_time_shift(test_dataset_patch_zone), test_dataset_patch_zone["struct_mass"].sum(dim="vid").values[0], label="Simulated 8-14 cm root biomass with patch")
     
-    ax[0].legend()
-    ax[0].set_title("Control biomass comparisions")
-    ax[1].legend()
-    ax[1].set_title("Patch addition biomass comparisions")
+    ax[0].legend(fontsize=15)
+    ax[0].set_title("Total dry mass comparisions", fontsize=20)
+    #ax[0].set_xlim(0, 700)
+    #ax[0].set_ylim(0, 0.3)
+    #ax[0].set_xlabel("t (h)", fontsize=15)
+    ax[0].set_ylabel("structural mass (g)", fontsize=15)
+    ax[1].legend(fontsize=15)
+    ax[1].set_title("8-12 cm dry mass comparisions", fontsize=20)
+    #ax[1].set_xlim(0, 700)
+    #ax[1].set_ylim(0, 0.08)
+    ax[1].set_xlabel("t (h)", fontsize=15)
+    ax[1].set_ylabel("structural mass (g)", fontsize=15)
 
     # Compare nitrogen uptake rates
     plot_csv_stackable(fig, ax[2], csv_dirpath="inputs/postprocessing", csv_name="Drew_biomass_si.csv", 
                        property="patch_zone_nitrate_uptake_control")
-    ax[2].plot((thermal_time_shift * control_dataset_patch_zone.t).values, control_dataset_patch_zone["import_Nm"].sum(dim="vid").values[0], label="Simulated nitrate uptake in patch zone, control")
+    ax[2].plot(thermal_time_shift(control_dataset_patch_zone), control_dataset_patch_zone["import_Nm"].sum(dim="vid").values[0], label="Simulated nitrate uptake in patch zone, control")
     plot_csv_stackable(fig, ax[2], csv_dirpath="inputs/postprocessing", csv_name="Drew_biomass_si.csv", 
                        property="patch_zone_nitrate_uptake_patch")
-    ax[2].plot((thermal_time_shift * test_dataset_patch_zone.t).values, test_dataset_patch_zone["import_Nm"].sum(dim="vid").values[0], label="Simulated nitrate uptake in fertilized patch zone")
+    ax[2].plot(thermal_time_shift(test_dataset_patch_zone), test_dataset_patch_zone["import_Nm"].sum(dim="vid").values[0], label="Simulated nitrate uptake in fertilized patch zone")
     
     ax[2].legend()
     ax[2].set_title("Nitrate uptake comparisions")
@@ -1442,7 +1468,7 @@ def log_mtg_coordinates(g):
     # We initialize the scene with the MTG g:
     turt.TurtleFrame(g, visitor=root_visitor, turtle=turtle, gc=False)
 
-def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen=False, flow_property=False, background_color="brown"):
+def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen=False, flow_property=False, background_color="brown", imposed_min=None, imposed_max=None, log_scale=False, spinning=False):
     from log.visualize import plot_mtg_alt
     with open(mtg_file_path, "rb") as f:
         g = pickle.load(f)
@@ -1455,11 +1481,11 @@ def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen
     if recording_off_screen:
         pv.start_xvfb()
 
-    plotter = pv.Plotter(off_screen=recording_off_screen, window_size=sizes["portrait"], lighting="three lights")
+    plotter = pv.Plotter(off_screen=recording_off_screen, window_size=sizes["landscape"], lighting="three lights")
     plotter.set_background(background_color)
-    step_back_coefficient = 0.5
+    step_back_coefficient = 0.2
     camera_coordinates = (step_back_coefficient, 0., 0.)
-    move_up_coefficient = 0.1
+    move_up_coefficient = 0.01
     horizontal_aiming = (0., 0., 1.)
     collar_position = (0., 0., -move_up_coefficient)
     plotter.camera_position = [camera_coordinates,
@@ -1472,10 +1498,39 @@ def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen
     root_system_mesh, color_property = plot_mtg_alt(g, cmap_property=property, flow_property=flow_property)
     if 0. in color_property:
                 color_property.remove(0.)
-    plotter.add_mesh(root_system_mesh, cmap="jet", clim=[min(color_property), max(color_property)], show_edges=False, log_scale=False)
-    plotter.add_text(f"MTG displaying {property} at t=", position="upper_left")
+    if imposed_min:
+        clim_min = imposed_min
+    else:
+        clim_min = min(color_property)
 
-    input()
+    if imposed_max:
+        clim_max = imposed_max
+    else:
+        clim_max = max(color_property)
+
+    plotter.add_mesh(root_system_mesh, cmap="jet", clim=[clim_min, clim_max], show_edges=False, log_scale=log_scale)
+    #plotter.add_text(f"MTG displaying {property} at day", position="upper_left")
+
+    if spinning:
+        plotter.open_movie(os.path.join(output_dirpath, f"{property}_spinning_view.mp4"))
+        n_frames = 360  # One rotation
+        spinning_speed = 0.9
+        zoom_factor = 1.002
+        down_factor = 1.0065
+        for i in range(n_frames):
+
+            plotter.camera_position = [
+                np.array(plotter.camera_position[0]) * zoom_factor,
+                np.array(plotter.camera_position[1]) * down_factor,
+                horizontal_aiming]
+            
+            plotter.camera.azimuth += 1 * spinning_speed
+            plotter.update()
+            plotter.write_frame()
+
+    
+
+    input("Save current view?")
 
     plotter.screenshot(os.path.join(output_dirpath, f'{property}_plot_snapshot.png'))
 
@@ -1532,3 +1587,10 @@ class Indicators:
 
     def Rhizodeposits_CN_Ratio(d):
         return (d.Gross_Hexose_Exudation * 6 + d.Gross_AA_Exudation * 5) / (d.Gross_AA_Exudation.where(d.Gross_AA_Exudation > 0.) *1.4)
+    
+    def CN_Ratio_Cumulated_Rhizodeposition(d):
+        gross_C = d.hexose_exudation + d.phloem_hexose_exudation + d.cells_release + d.mucilage_secretion - d.hexose_uptake_from_soil - d.phloem_hexose_uptake_from_soil
+        gross_N = d.diffusion_AA_soil + d.diffusion_AA_soil_xylem - d.import_AA
+        cum_gross_C = gross_C.cumsum(dim="t")
+        cum_gross_N = gross_N.cumsum(dim="t")
+        return cum_gross_C / cum_gross_N.where(cum_gross_N > 0.)
