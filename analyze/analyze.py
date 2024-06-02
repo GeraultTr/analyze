@@ -97,14 +97,17 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         # First individual analyses
         for scenario in scenarios:
             raw_dirpath = os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_raw/")
+            mtg_dirpath = os.path.join(outputs_dirpath, scenario, "MTG_files/")
+
             if len(scenarios) > 1:
                 scenario_dataset = filter_dataset(dataset, scenario=scenario)
             else:
                 scenario_dataset = dataset
+
             #CN_balance_animation_pipeline(dataset=dataset, outputs_dirpath=outputs_dirpath, fps=fps)
             #surface_repartition(dataset, output_dirpath=outputs_dirpath, fps=fps)
-            # apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
-            #                        flow="hexose_exudation", summed_input="hexose_diffusion_from_phloem", color_prop="Nm")
+            apex_zone_contribution(scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=0.02,
+                                   flow="import_Nm", summed_input="hexose_diffusion_from_phloem", color_prop="Nm")
             # apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
             #                        flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="C_hexose_root")
             # trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="distance_from_tip", y="NAE",
@@ -129,10 +132,10 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             #         #pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="AA", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
             #         pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="Nm", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
 
-            # post_color_mtg(os.path.join(outputs_dirpath, scenario, "MTG_files/root_347.pckl"), os.path.join("outputs", scenario, "MTG_files"), property="nitrate_transporters_affinity_factor")
-            # post_color_mtg(os.path.join(outputs_dirpath, scenario, "MTG_files/root_347.pckl"),
-            #                os.path.join(outputs_dirpath, scenario, "MTG_files"),
-            #                property="Nm")
+            # post_color_mtg(os.path.join(mtg_dirpath, "root_1237.pckl"), mtg_dirpath, property="import_Nm", 
+            #                recording_off_screen=False, background_color="grey")
+
+
 
         # Then scenario comparisions
         comparisions_dirpath = os.path.join(outputs_dirpath, "comparisions")
@@ -159,7 +162,7 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         # fig_zcontrib.savefig(os.path.join(comparisions_dirpath, f"z_zone_contribution_{zcontrib_flow}.png"))
         # plt.close()
         #
-        pipeline_compare_to_experimental_data(dataset=dataset, output_path=comparisions_dirpath)
+        #pipeline_compare_to_experimental_data(dataset=dataset, output_path=comparisions_dirpath)
 
         print("     [INFO] Finished plotting raw logs")
 
@@ -1073,7 +1076,7 @@ def apex_zone_contribution(dataset, output_dirpath, apex_zone_length, flow, summ
     ax[1].set_ylabel("Outperforming of mean per length exchanges (%)")
     ax[1].legend()
 
-    fig.savefig(os.path.join(output_dirpath, f"MTG_properties\\MTG_properties_raw\\apex_contribution_{flow}.png"))
+    fig.savefig(os.path.join(output_dirpath, f"apex_contribution_{flow}.png"))
     plt.close()
 
 def z_zone_contribution(fig, ax, dataset, zmin, zmax, flow, scenario="", mean_proportion=False,
@@ -1439,7 +1442,7 @@ def log_mtg_coordinates(g):
     # We initialize the scene with the MTG g:
     turt.TurtleFrame(g, visitor=root_visitor, turtle=turtle, gc=False)
 
-def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen=False, flow_property=False):
+def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen=False, flow_property=False, background_color="brown"):
     from log.visualize import plot_mtg_alt
     with open(mtg_file_path, "rb") as f:
         g = pickle.load(f)
@@ -1452,8 +1455,8 @@ def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen
     if recording_off_screen:
         pv.start_xvfb()
 
-    plotter = pv.Plotter(off_screen=not recording_off_screen, window_size=sizes["portrait"], lighting="three lights")
-    plotter.set_background("brown")
+    plotter = pv.Plotter(off_screen=recording_off_screen, window_size=sizes["portrait"], lighting="three lights")
+    plotter.set_background(background_color)
     step_back_coefficient = 0.5
     camera_coordinates = (step_back_coefficient, 0., 0.)
     move_up_coefficient = 0.1
@@ -1472,7 +1475,10 @@ def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen
     plotter.add_mesh(root_system_mesh, cmap="jet", clim=[min(color_property), max(color_property)], show_edges=False, log_scale=False)
     plotter.add_text(f"MTG displaying {property} at t=", position="upper_left")
 
+    input()
+
     plotter.screenshot(os.path.join(output_dirpath, f'{property}_plot_snapshot.png'))
+
 
 
 class Indicators:
