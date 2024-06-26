@@ -84,10 +84,12 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         dataset["Cumulative_Carbon_Costs"] = Indicators.Cumulative_Carbon_Costs(d=dataset)
         dataset["Gross_Hexose_Exudation"] = Indicators.Gross_Hexose_Exudation(d=dataset)
         dataset["Gross_AA_Exudation"] = Indicators.Gross_AA_Exudation(d=dataset)
-        dataset["Gross_Rhizodeposition"] = Indicators.Gross_Rhizodeposition(d=dataset)
+        dataset["Gross_C_Rhizodeposition"] = Indicators.Gross_C_Rhizodeposition(d=dataset)
         dataset["Rhizodeposits_CN_Ratio"] = Indicators.Rhizodeposits_CN_Ratio(d=dataset)
         dataset["CN_Ratio_Cumulated_Rhizodeposition"] = Indicators.CN_Ratio_Cumulated_Rhizodeposition(d=dataset)
         dataset["z2"] = - dataset["z2"]
+        dataset["Root_Hairs_Surface"] = Indicators.Root_Hairs_Surface(d=dataset)
+        dataset["Root_Hairs_Proportion"] = Indicators.Root_Hairs_Proportion(d=dataset)
 
 
         # Z contributions
@@ -133,10 +135,10 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             #         #pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="AA", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
             #         pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="Nm", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
 
-            # post_color_mtg(os.path.join(mtg_dirpath, "root_1239.pckl"), mtg_dirpath, property="import_Nm", flow_property=True, 
-            #                recording_off_screen=False, background_color="brown", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=True)
-            post_color_mtg(os.path.join(mtg_dirpath, "root_1527.pckl"), mtg_dirpath, property="import_Nm", flow_property=True, 
-                           recording_off_screen=False, background_color="white", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=True)
+            post_color_mtg(os.path.join(mtg_dirpath, "root_1570.pckl"), mtg_dirpath, property="import_Nm", flow_property=True, 
+                           recording_off_screen=False, background_color="brown", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=False, root_hairs=True)
+            #post_color_mtg(os.path.join(mtg_dirpath, "root_1527.pckl"), mtg_dirpath, property="import_Nm", flow_property=True, 
+            #                recording_off_screen=False, background_color="white", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=True)
 
 
 
@@ -151,8 +153,8 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         #                                     fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=False, x_max_down=20, special_case=True)
 
         # #!!!!! R3 !!!!!
-        # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="struct_mass", metabolic_flow="Gross_Rhizodeposition", 
-        #                                     fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=False, x_max_down=1, x_max_up=5e-9)
+        # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="struct_mass", metabolic_flow="Gross_C_Rhizodeposition", 
+        #                                     fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=False, x_max_down=1, x_max_up=3e-8, log_scale=False)
         
         # #!!!!! R4 !!!!!
         # stride = 24
@@ -161,8 +163,17 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
 
         # screenshot_time = 1152
         # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="struct_mass", metabolic_flow="CN_Ratio_Cumulated_Rhizodeposition", 
-        #                                     fps=fps, t_start=screenshot_time, t_stop=screenshot_time, step=1, stride=1, mean_and_std=True, x_max_down=1, x_max_up=200, screenshot=True)
+        #                                     fps=fps, t_start=screenshot_time, t_stop=screenshot_time, step=1, stride=1, mean_and_std=True, x_max_down=1, x_max_up=1000, screenshot=True, log_scale=True)
         
+
+        # !!!!! R Test !!!!!
+        # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="struct_mass", metabolic_flow="Root_Hairs_Proportion", 
+        #                                     fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=True, x_max_down=1, x_max_up=0.01, log_scale=False)
+        
+        # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="struct_mass", metabolic_flow="Root_Hairs_Surface", 
+        #                                     fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=True, x_max_down=1, x_max_up=1e-5, log_scale=False)
+        
+
         # ax_zcontrib.legend()
         # ax_zcontrib.set_ylabel("proportion")
         # ax_zcontrib.set_title("Contributions of the patch zones relative to the whole root system")
@@ -180,9 +191,10 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         print(" [INFO] Finished  CN-Wheat plots")
 
     if on_performance:
-        print(" [INFO] Analysing running performances...")
-        plot_csv(csv_dirpath=outputs_dirpath, csv_name="simulation_performance.csv", stacked=True)
-        print(" [INFO] Finished plotting performances")
+        for scenario in scenarios:
+            print(" [INFO] Analysing running performances...")
+            plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario), csv_name="simulation_performance.csv", stacked=True)
+            print(" [INFO] Finished plotting performances")
 
 def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
     log = pd.read_csv(os.path.join(csv_dirpath, csv_name))
@@ -1283,7 +1295,7 @@ def pipeline_z_bins_animations(dataset, output_path, prop, metabolite, t_start=4
     print("         [INFO] Finished")
 
 
-def pipeline_compare_z_bins_animations(dataset, scenarios, output_path, prop, metabolic_flow="import_Nm", t_start=400, t_stop=450, fps=15, bin_z_width=0.01, mean_and_std=True, step=1, stride=1, x_max_down=1, x_max_up=1, special_case=False, screenshot=False):
+def pipeline_compare_z_bins_animations(dataset, scenarios, output_path, prop, metabolic_flow="import_Nm", t_start=400, t_stop=450, fps=15, bin_z_width=0.01, mean_and_std=True, step=1, stride=1, x_max_down=1, x_max_up=1, special_case=False, screenshot=False, log_scale=False):
     print(f"    [INFO] Starting vertical bins animations for {metabolic_flow} balance to explain {prop}")
     fig, ax = plt.subplots(2, 1, figsize=(9, 16))
     
@@ -1296,8 +1308,11 @@ def pipeline_compare_z_bins_animations(dataset, scenarios, output_path, prop, me
     #     filter_prop = "distance_from_tip"
     #     propmax = 0.01
 
-    scenarios_names_translator ={"Drew_1975_low":"Uniform 0.01 mM", "Drew_1975_1":"0.01 mM + 1 mM patch from 8 to 12 cm"}
-    colors = {"Uniform 0.01 mM": "silver", "0.01 mM + 1 mM patch from 8 to 12 cm":"limegreen"}
+    # scenarios_names_translator ={"Drew_1975_low":"Uniform 0.01 mM", "Drew_1975_1":"0.01 mM + 1 mM patch from 8 to 12 cm"}
+    # colors = {"Uniform 0.01 mM": "silver", "0.01 mM + 1 mM patch from 8 to 12 cm":"limegreen"}
+    
+    scenarios_names_translator ={"Drew_1975_low":"Uniform 0.01 mM", "no_root_hairs":"hairless"}
+    colors = {"Uniform 0.01 mM": "silver", "hairless":"limegreen"}
     per_scenario_data = {scenarios_names_translator[scenario]: filter_dataset(dataset, scenario=scenario, only_keep=[prop, metabolic_flow, "z2", "Cumulative_Nitrogen_Uptake", "Cumulative_Carbon_Costs", "distance_from_tip", "struct_mass", "Rhizodeposits_CN_Ratio"], 
                         tmin=t_start, tmax=t_stop, prop=filter_prop, propmin=propmin, propmax=propmax) for scenario in scenarios}
 
@@ -1328,8 +1343,9 @@ def pipeline_compare_z_bins_animations(dataset, scenarios, output_path, prop, me
         #ax[1].set_title(f"Comparisions between homogeneous and patchy concentrations", fontsize=fontsize)
         ax[1].legend(loc="lower right", fontsize=fontsize)
 
-        ax[0].set_xlim((0.1, x_max_up))
-        ax[0].set_xscale('log')
+        ax[0].set_xlim((0, x_max_up))
+        if log_scale:
+            ax[0].set_xscale('log')
         ax[0].set_ylim((-z_min, 0.))
         ax[0].set_ylabel("depth (m)", fontsize=fontsize+5)
         ax[0].set_xlabel(f"{metabolic_flow} (mol.s-1)", fontsize=fontsize+5)
@@ -1381,13 +1397,13 @@ def pipeline_compare_to_experimental_data(dataset, output_path):
     ax[1].plot(thermal_time_shift(test_dataset_patch_zone), test_dataset_patch_zone["struct_mass"].sum(dim="vid").values[0], label="Simulated 8-14 cm root biomass with patch")
     
     ax[0].legend(fontsize=15)
-    ax[0].set_title("Total dry mass comparisions", fontsize=20)
+    ax[0].set_title("Total dry mass comparisons", fontsize=20)
     #ax[0].set_xlim(0, 700)
     #ax[0].set_ylim(0, 0.3)
     #ax[0].set_xlabel("t (h)", fontsize=15)
     ax[0].set_ylabel("structural mass (g)", fontsize=15)
     ax[1].legend(fontsize=15)
-    ax[1].set_title("8-12 cm dry mass comparisions", fontsize=20)
+    ax[1].set_title("8-12 cm dry mass comparisons", fontsize=20)
     #ax[1].set_xlim(0, 700)
     #ax[1].set_ylim(0, 0.08)
     ax[1].set_xlabel("t (h)", fontsize=15)
@@ -1468,10 +1484,13 @@ def log_mtg_coordinates(g):
     # We initialize the scene with the MTG g:
     turt.TurtleFrame(g, visitor=root_visitor, turtle=turtle, gc=False)
 
-def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen=False, flow_property=False, background_color="brown", imposed_min=None, imposed_max=None, log_scale=False, spinning=False):
+def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen=False, flow_property=False, background_color="brown", 
+                   imposed_min=None, imposed_max=None, log_scale=False, spinning=False, root_hairs=True):
     from log.visualize import plot_mtg_alt
     with open(mtg_file_path, "rb") as f:
         g = pickle.load(f)
+
+    print(len(g.properties()["struct_mass"]))
     log_mtg_coordinates(g)
     props = g.properties()
     
@@ -1495,7 +1514,12 @@ def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen
     plotter.show(interactive_update=True)
 
     # Then add initial states of plotted compartments
-    root_system_mesh, color_property = plot_mtg_alt(g, cmap_property=property, flow_property=flow_property)
+    if not root_hairs:
+        root_system_mesh, color_property = plot_mtg_alt(g, cmap_property=property, flow_property=flow_property)
+    else:
+        root_system_mesh, color_property, root_hairs_system = plot_mtg_alt(g, cmap_property=property, flow_property=flow_property, root_hairs=root_hairs)
+
+
     if 0. in color_property:
                 color_property.remove(0.)
     if imposed_min:
@@ -1508,8 +1532,10 @@ def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen
     else:
         clim_max = max(color_property)
 
-    plotter.add_mesh(root_system_mesh, cmap="jet", clim=[clim_min, clim_max], show_edges=False, log_scale=log_scale)
+    plotter.add_mesh(root_system_mesh, scalars=property+".m-1", cmap="jet", clim=[clim_min, clim_max], show_edges=False, log_scale=log_scale)
     #plotter.add_text(f"MTG displaying {property} at day", position="upper_left")
+    if root_hairs:
+        plotter.add_mesh(root_hairs_system, scalars="living_root_hairs_struct_mass", opacity=0.05, cmap="gist_gray", show_edges=False)
 
     if spinning:
         plotter.open_movie(os.path.join(output_dirpath, f"{property}_spinning_view.mp4"))
@@ -1527,8 +1553,6 @@ def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen
             plotter.camera.azimuth += 1 * spinning_speed
             plotter.update()
             plotter.write_frame()
-
-    
 
     input("Save current view?")
 
@@ -1582,8 +1606,8 @@ class Indicators:
         """
         return d.diffusion_AA_soil + d.diffusion_AA_soil_xylem - d.import_AA
     
-    def Gross_Rhizodeposition(d):
-        return d.Gross_Hexose_Exudation + d.Gross_AA_Exudation
+    def Gross_C_Rhizodeposition(d):
+        return d.Gross_Hexose_Exudation * 6 + d.Gross_AA_Exudation * 5
 
     def Rhizodeposits_CN_Ratio(d):
         return (d.Gross_Hexose_Exudation * 6 + d.Gross_AA_Exudation * 5) / (d.Gross_AA_Exudation.where(d.Gross_AA_Exudation > 0.) *1.4)
@@ -1593,4 +1617,10 @@ class Indicators:
         gross_N = d.diffusion_AA_soil + d.diffusion_AA_soil_xylem - d.import_AA
         cum_gross_C = gross_C.cumsum(dim="t")
         cum_gross_N = gross_N.cumsum(dim="t")
-        return cum_gross_C / cum_gross_N.where(cum_gross_N > 0.)
+        return (cum_gross_C * 6 + cum_gross_N * 5) / (cum_gross_N.where(cum_gross_N > 0.) * 1.4)
+    
+    def Root_Hairs_Surface(d):
+        return ((6e-6 * 2 * np.pi) * d.root_hair_length) * d.total_root_hairs_number
+    
+    def Root_Hairs_Proportion(d):
+        return d.Root_Hairs_Surface / d.root_exchange_surface.where(d.root_exchange_surface > 0.)
