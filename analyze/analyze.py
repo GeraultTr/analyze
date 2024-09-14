@@ -44,7 +44,8 @@ balance_dicts = {"hexose": dict(hexose_exudation={"type": "output", "conversion"
                         storage_synthesis={"type": "output", "conversion": 65},
                         storage_catabolism={"type": "input", "conversion": 1 / 65},
                         AA_catabolism={"type": "output", "conversion": 1.},
-                        amino_acids_consumption_by_growth={"type": "output", "conversion": 1.}), 
+                        #amino_acids_consumption_by_growth={"type": "output", "conversion": 1.}
+                        ), 
 
                 "Nm": dict(import_Nm={"type": "input", "conversion": 1.},
                     diffusion_Nm_soil={"type": "output", "conversion": 1.},
@@ -78,15 +79,15 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         
         fps=5
         dataset = open_and_merge_datasets(scenarios=scenarios, root_outputs_path=outputs_dirpath)
-        dataset["NAE"] = Indicators.Nitrogen_Aquisition_Efficiency(d=dataset)
-        dataset["Cumulative_NAE"] = Indicators.Cumulative_Nitrogen_Aquisition_Efficiency(d=dataset)
-        dataset["Cumulative_Nitrogen_Uptake"] = Indicators.Cumulative_Nitrogen_Uptake(d=dataset)
-        dataset["Cumulative_Carbon_Costs"] = Indicators.Cumulative_Carbon_Costs(d=dataset)
-        dataset["Gross_Hexose_Exudation"] = Indicators.Gross_Hexose_Exudation(d=dataset)
+        #dataset["NAE"] = Indicators.Nitrogen_Aquisition_Efficiency(d=dataset)
+        #dataset["Cumulative_NAE"] = Indicators.Cumulative_Nitrogen_Aquisition_Efficiency(d=dataset)
+        #dataset["Cumulative_Nitrogen_Uptake"] = Indicators.Cumulative_Nitrogen_Uptake(d=dataset)
+        #dataset["Cumulative_Carbon_Costs"] = Indicators.Cumulative_Carbon_Costs(d=dataset)
+        #dataset["Gross_Hexose_Exudation"] = Indicators.Gross_Hexose_Exudation(d=dataset)
         dataset["Gross_AA_Exudation"] = Indicators.Gross_AA_Exudation(d=dataset)
-        dataset["Gross_C_Rhizodeposition"] = Indicators.Gross_C_Rhizodeposition(d=dataset)
-        dataset["Rhizodeposits_CN_Ratio"] = Indicators.Rhizodeposits_CN_Ratio(d=dataset)
-        dataset["CN_Ratio_Cumulated_Rhizodeposition"] = Indicators.CN_Ratio_Cumulated_Rhizodeposition(d=dataset)
+        #dataset["Gross_C_Rhizodeposition"] = Indicators.Gross_C_Rhizodeposition(d=dataset)
+        #dataset["Rhizodeposits_CN_Ratio"] = Indicators.Rhizodeposits_CN_Ratio(d=dataset)
+        #dataset["CN_Ratio_Cumulated_Rhizodeposition"] = Indicators.CN_Ratio_Cumulated_Rhizodeposition(d=dataset)
         dataset["z2"] = - dataset["z2"]
         dataset["Root_Hairs_Surface"] = Indicators.Root_Hairs_Surface(d=dataset)
         dataset["Root_Hairs_Proportion"] = Indicators.Root_Hairs_Proportion(d=dataset)
@@ -107,10 +108,12 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             else:
                 scenario_dataset = dataset
 
-            #CN_balance_animation_pipeline(dataset=dataset, outputs_dirpath=outputs_dirpath, fps=fps)
+            CN_balance_animation_pipeline(dataset=dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps)
             #surface_repartition(dataset, output_dirpath=outputs_dirpath, fps=fps)
+            apex_zone_contribution(scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=0.005,
+                                   flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="root_exchange_surface")
             # apex_zone_contribution(scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=0.02,
-            #                        flow="import_Nm", summed_input="hexose_diffusion_from_phloem", color_prop="Nm")
+            #                        flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="C_hexose_root")
             # apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
             #                        flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="C_hexose_root")
             # trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="distance_from_tip", y="NAE",
@@ -121,7 +124,7 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             #z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow="Gross_AA_Exudation")
             
             # Snapshots over specific days
-            # ignore, snapshot_length, snapshot_number = 72, 24, 1
+            # ignore, snapshot_length, snapshot_number = 72, 1100, 1
             # props = ["root_exchange_surface", "NAE", "Rhizodeposits_CN_Ratio"]
             # props = ["root_exchange_surface"]
             # mean_and_std = [False, True, True]
@@ -131,12 +134,12 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             # for snp in range(1, snapshot_number+1):
             #     tstart, tstop = ignore + snp*distance, ignore + snp*distance + snapshot_length
             #     for i, prop in enumerate(props):
-            #         #pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="hexose", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
-            #         #pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="AA", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
+            #         pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="hexose", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
+            #         pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="AA", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
             #         pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="Nm", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
 
-            post_color_mtg(os.path.join(mtg_dirpath, "root_1570.pckl"), mtg_dirpath, property="import_Nm", flow_property=True, 
-                           recording_off_screen=False, background_color="brown", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=False, root_hairs=True)
+            # post_color_mtg(os.path.join(mtg_dirpath, "root_1570.pckl"), mtg_dirpath, property="import_Nm", flow_property=True, 
+            #                recording_off_screen=False, background_color="brown", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=False, root_hairs=True)
             #post_color_mtg(os.path.join(mtg_dirpath, "root_1527.pckl"), mtg_dirpath, property="import_Nm", flow_property=True, 
             #                recording_off_screen=False, background_color="white", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=True)
 
@@ -186,9 +189,10 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         print("     [INFO] Finished plotting raw logs")
 
     if on_shoot_logs:
-        print(" [INFO] Starting producing CN-Wheat plots...")
-        cnwheat_plot_csv(csv_dirpath=os.path.join(outputs_dirpath, "MTG_properties/shoot_properties"))
-        print(" [INFO] Finished  CN-Wheat plots")
+        for scenario in scenarios:
+            print(" [INFO] Starting producing CN-Wheat plots...")
+            cnwheat_plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/shoot_properties"))
+            print(" [INFO] Finished  CN-Wheat plots")
 
     if on_performance:
         for scenario in scenarios:
@@ -202,7 +206,7 @@ def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
     units = log.iloc[0]
 
     # Ignore unit value for plots and initialization values for plots' readability
-    log = log[2:].astype(float)
+    log = log[1:].astype(float)
 
     plot_path = os.path.join(csv_dirpath, "plots")
 
@@ -927,7 +931,7 @@ def xarray_deep_learning(dataset, mtg, global_state_extracts, global_flow_extrac
 def CN_balance_animation_pipeline(dataset, outputs_dirpath, fps):
     print("     [INFO] Producing balance animations...")
     
-    bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="C_hexose_root", balance_dict=balance_dicts["hexose"], fps=fps)
+    #bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="C_hexose_root", balance_dict=balance_dicts["hexose"], fps=fps)
     
     bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="AA", balance_dict=balance_dicts["AA"],
                       fps=fps)
@@ -990,7 +994,7 @@ def pie_balance_xarray_animations(dataset, output_dirpath, pool, balance_dict, i
 
 y_limits = [1e-10 for k in range(100)]
     
-def bar_balance_xarray_animations(dataset, output_dirpath, pool, balance_dict, fps=15):
+def bar_balance_xarray_animations(dataset, output_dirpath, pool, balance_dict, input_composition=False, fps=15):
 
     used_dataset = dataset[list(balance_dict.keys())].sum(dim="vid")
 
@@ -1077,9 +1081,13 @@ def surface_repartition(dataset, output_dirpath, fps):
 
 
 def apex_zone_contribution(dataset, output_dirpath, apex_zone_length, flow, summed_input, color_prop):
+    """
+    Description : Computes two plots. First is the apex zone contribution to the overall selected zone. Apex zone length is user defined.
+    Second plot shows for all vids summed when the apices group outperform the other segements relative to the length they represent.
+    """
     fig, ax = plt.subplots(2, 1)
     fig.set_size_inches(10.5, 18.5)
-    dataset = dataset.where(dataset.t>25)
+    dataset = dataset.where(dataset.t>1)
     apex_zone = dataset.where(dataset["distance_from_tip"] <= apex_zone_length, 0.)
     apex_proportion = apex_zone[flow].sum(dim="vid") / dataset[flow].sum(dim="vid")
     length_proportion = apex_zone["length"].sum(dim="vid") / dataset["length"].sum(dim="vid")
@@ -1500,7 +1508,7 @@ def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen
     if recording_off_screen:
         pv.start_xvfb()
 
-    plotter = pv.Plotter(off_screen=recording_off_screen, window_size=sizes["landscape"], lighting="three lights")
+    plotter = pv.Plotter(off_screen=recording_off_screen, window_size=sizes["portrait"], lighting="three lights")
     plotter.set_background(background_color)
     step_back_coefficient = 0.2
     camera_coordinates = (step_back_coefficient, 0., 0.)
