@@ -20,7 +20,7 @@ import openalea.plantgl.all as pgl
 
 
 
-balance_dicts = {"hexose": dict(hexose_exudation={"type": "output", "conversion": 1.},
+balance_dicts_C = {"hexose": dict(hexose_exudation={"type": "output", "conversion": 1.},
                         hexose_uptake_from_soil={"type": "input", "conversion": 1.},
                         mucilage_secretion={"type": "output", "conversion": 1.},
                         cells_release={"type": "output", "conversion": 1.},
@@ -44,7 +44,7 @@ balance_dicts = {"hexose": dict(hexose_exudation={"type": "output", "conversion"
                         storage_synthesis={"type": "output", "conversion": 65},
                         storage_catabolism={"type": "input", "conversion": 1 / 65},
                         AA_catabolism={"type": "output", "conversion": 1.},
-                        #amino_acids_consumption_by_growth={"type": "output", "conversion": 1.}
+                        amino_acids_consumption_by_growth={"type": "output", "conversion": 1.}
                         ), 
 
                 "Nm": dict(import_Nm={"type": "input", "conversion": 1.},
@@ -55,6 +55,26 @@ balance_dicts = {"hexose": dict(hexose_exudation={"type": "output", "conversion"
                     AA_catabolism={"type": "input", "conversion": 1./1.4}),
                 "rhizodeposits": dict(Gross_Hexose_Exudation={"type": "output", "conversion": 1.},
                     Gross_AA_Exudation={"type": "output", "conversion": 1.})
+                 }
+
+balance_dicts_no_C = {
+                "AA": dict(diffusion_AA_phloem={"type": "input", "conversion": 1.},
+                        import_AA={"type": "input", "conversion": 1.},
+                        diffusion_AA_soil={"type": "output", "conversion": 1.},
+                        export_AA={"type": "output", "conversion": 1.},
+                        AA_synthesis={"type": "input", "conversion": 1.},
+                        storage_synthesis={"type": "output", "conversion": 65},
+                        storage_catabolism={"type": "input", "conversion": 1 / 65},
+                        AA_catabolism={"type": "output", "conversion": 1.}
+                        ),
+
+                "Nm": dict(import_Nm={"type": "input", "conversion": 1.},
+                    diffusion_Nm_soil={"type": "output", "conversion": 1.},
+                    diffusion_Nm_xylem={"type": "input", "conversion": 1.},
+                    export_Nm={"type": "output", "conversion": 1.},
+                    AA_synthesis={"type": "output", "conversion": 1.4},
+                    AA_catabolism={"type": "input", "conversion": 1./1.4}),
+                "rhizodeposits": dict(Gross_AA_Exudation={"type": "output", "conversion": 1.})
                  }
 
 
@@ -98,6 +118,7 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         fig_zcontrib, ax_zcontrib = plt.subplots(1, 1)
         fig_zcontrib.set_size_inches(10.5, 10.5)
 
+
         # First individual analyses
         for scenario in scenarios:
             raw_dirpath = os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_raw/")
@@ -108,10 +129,11 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             else:
                 scenario_dataset = dataset
 
-            CN_balance_animation_pipeline(dataset=dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps)
+            #CN_balance_animation_pipeline(dataset=dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=False)
             #surface_repartition(dataset, output_dirpath=outputs_dirpath, fps=fps)
-            apex_zone_contribution(scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=0.005,
-                                   flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="root_exchange_surface")
+
+            # apex_zone_contribution(scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=0.05,
+                                # flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="root_exchange_surface")
             # apex_zone_contribution(scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=0.02,
             #                        flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="C_hexose_root")
             # apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
@@ -144,9 +166,9 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             #                recording_off_screen=False, background_color="white", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=True)
 
 
-
         # Then scenario comparisions
         comparisions_dirpath = os.path.join(outputs_dirpath, "comparisions")
+        apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath)
         # #!!!!! R1 !!!!!
         # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="root_exchange_surface", metabolic_flow="import_Nm", 
         #                                    fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=False, x_max_down=2.5, x_max_up=4e-8)
@@ -928,16 +950,25 @@ def xarray_deep_learning(dataset, mtg, global_state_extracts, global_flow_extrac
         run_analysis(file=dataset, output_path=output_dir, extract_props=pool_locals)
 
 
-def CN_balance_animation_pipeline(dataset, outputs_dirpath, fps):
+def CN_balance_animation_pipeline(dataset, outputs_dirpath, fps, C_balance=True):
     print("     [INFO] Producing balance animations...")
-    
-    #bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="C_hexose_root", balance_dict=balance_dicts["hexose"], fps=fps)
-    
-    bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="AA", balance_dict=balance_dicts["AA"],
-                      fps=fps)
 
-    bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="Nm", balance_dict=balance_dicts["Nm"],
-                      fps=fps)
+    if C_balance:
+        bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="C_hexose_root", balance_dict=balance_dicts_C["hexose"], fps=fps)
+
+        bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="AA", balance_dict=balance_dicts_C["AA"],
+                          fps=fps)
+
+        bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="Nm", balance_dict=balance_dicts_C["Nm"],
+                          fps=fps)
+    else:
+        bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="AA",
+                                      balance_dict=balance_dicts_no_C["AA"],
+                                      fps=fps)
+
+        bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="Nm",
+                                      balance_dict=balance_dicts_no_C["Nm"],
+                                      fps=fps)
     
     print("     [INFO] Finished")
 
@@ -1080,32 +1111,37 @@ def surface_repartition(dataset, output_dirpath, fps):
                    dpi=100)
 
 
-def apex_zone_contribution(dataset, output_dirpath, apex_zone_length, flow, summed_input, color_prop):
+def apex_zone_contribution(d, output_dirpath, apex_zone_length, flow, summed_input, color_prop, plotting=True):
     """
     Description : Computes two plots. First is the apex zone contribution to the overall selected zone. Apex zone length is user defined.
     Second plot shows for all vids summed when the apices group outperform the other segements relative to the length they represent.
     """
-    fig, ax = plt.subplots(2, 1)
-    fig.set_size_inches(10.5, 18.5)
-    dataset = dataset.where(dataset.t>1)
-    apex_zone = dataset.where(dataset["distance_from_tip"] <= apex_zone_length, 0.)
-    apex_proportion = apex_zone[flow].sum(dim="vid") / dataset[flow].sum(dim="vid")
-    length_proportion = apex_zone["length"].sum(dim="vid") / dataset["length"].sum(dim="vid")
-    apex_proportion.plot.line(x="t", ax=ax[0], label=f"{flow} proportion")
-    length_proportion.plot.line(x="t", ax=ax[0], label="length proportion")
-    ax[0].legend()
-    ax[0].set_ylabel("proportion")
 
-    apices_outperform = 100 * (apex_proportion - length_proportion) / length_proportion
+    apex_zone = d.where(d["distance_from_tip"] <= apex_zone_length, 0.)
+    apex_proportion = apex_zone[flow].sum(dim="vid") / d[flow].sum(dim="vid")
+    length_proportion = apex_zone["length"].sum(dim="vid") / d["length"].sum(dim="vid")
 
-    m = ax[1].scatter(dataset[summed_input].sum(dim="vid") / dataset["struct_mass"].sum(dim="vid"), apices_outperform, c=apex_zone[color_prop].mean(dim="vid"))
-    fig.colorbar(m, ax=ax[1], label=color_prop)
-    ax[1].set_xlabel("Summed input par mass unit : " + summed_input + " (mol.g-1.s-1)")
-    ax[1].set_ylabel("Outperforming of mean per length exchanges (%)")
-    ax[1].legend()
+    if plotting:
+        fig, ax = plt.subplots(2, 1)
+        fig.set_size_inches(10.5, 18.5)
+        
+        apex_proportion.plot.line(x="t", ax=ax[0], label=f"{flow} proportion")
+        length_proportion.plot.line(x="t", ax=ax[0], label="length proportion")
+        ax[0].legend()
+        ax[0].set_ylabel("proportion")
 
-    fig.savefig(os.path.join(output_dirpath, f"apex_contribution_{flow}.png"))
-    plt.close()
+        apices_outperform = 100 * (apex_proportion - length_proportion) / length_proportion
+
+        m = ax[1].scatter(d[summed_input].sum(dim="vid") / d["struct_mass"].sum(dim="vid"), apices_outperform, c=apex_zone[color_prop].mean(dim="vid"))
+        fig.colorbar(m, ax=ax[1], label=color_prop)
+        ax[1].set_xlabel("Summed input par mass unit : " + summed_input + " (mol.g-1.s-1)")
+        ax[1].set_ylabel("Outperforming of mean per length exchanges (%)")
+        ax[1].legend()
+
+        fig.savefig(os.path.join(output_dirpath, f"apex_contribution_{flow}.png"))
+        plt.close()
+
+    return apex_proportion
 
 def z_zone_contribution(fig, ax, dataset, zmin, zmax, flow, scenario="", mean_proportion=False,
                                                                     per_surface=False,
@@ -1174,13 +1210,14 @@ def compare_to_exp_biomass_pipeline(dataset, output_path):
 def filter_dataset(d, scenario=None, time=None, tmin=None, tmax=None, vids=[], only_keep=None, prop=None, propmin=None, propmax=None):
     
     if scenario:
+        
         d = d.where(d.scenario == scenario).sum(dim="scenario")
 
     if only_keep:
         d = d[only_keep]
 
     if time:
-        d = d.where(d.t == time)
+        d = d.where(d.t == time).sum(dim="t")
     else:
         if tmin:
             d = d.where(d.t >= tmin)
@@ -1220,7 +1257,7 @@ def open_and_merge_datasets(scenarios, root_outputs_path = "outputs"):
             datasets_with_new_dim.append(ds_expanded)
 
         # Step 3: Combine the datasets along the new dimension
-        merged_dataset = xr.concat(datasets_with_new_dim, dim="scenario", join="inner")
+        merged_dataset = xr.concat(datasets_with_new_dim, dim="scenario", join="outer")
         print("         [INFO] Finished")
         return merged_dataset
 
@@ -1430,6 +1467,85 @@ def pipeline_compare_to_experimental_data(dataset, output_path):
 
     fig.savefig(os.path.join(output_path, "biomasses comparision.png"))
     plt.close()
+
+def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath):
+
+    final_dataset = filter_dataset(dataset, time=dataset.t.max())
+    
+    # Dataframe storing computations
+    df = pd.DataFrame()
+
+    # First individual analyses
+    for scenario in scenarios:
+        find_day = scenario.find("_D")
+        replicate = scenario[find_day-2:find_day]
+        age = float(scenario[find_day+2:])
+        print(f"Processing replicate {replicate} at age {age} days...")
+
+        raw_dirpath = os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_raw/")
+
+        if len(scenarios) > 1:
+            scenario_dataset = filter_dataset(final_dataset, scenario=scenario)
+        else:
+            scenario_dataset = final_dataset
+
+        for azl in np.linspace(0, 0.15, num=10):
+            stabilized_value = apex_zone_contribution(d=scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=azl,
+                                flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="root_exchange_surface", plotting=False)
+            df = pd.concat([df, pd.DataFrame({"apex_zone_length":[azl], 
+                                                "apex_zone_contribution":[float(stabilized_value[0])],
+                                                "age":[age],
+                                                "replicate":[replicate]
+                                                }
+                                                )
+                            ], ignore_index=True)
+
+
+    fig, ax = plt.subplots()
+
+    # Unique categories for color and marker
+    color_categories = df['age'].unique()
+    line_categories = df['replicate'].unique()
+
+    import matplotlib.cm as cm
+
+    # Choose a colormap and normalize it based on the number of categories
+    colormap = cm.get_cmap('viridis', len(color_categories))  # You can choose any other colormap like 'plasma', 'coolwarm'
+    colors = {category: colormap(i) for i, category in enumerate(color_categories)}
+
+    # Assign markers to each marker category
+    available_line_styles = ['-', '--', '-.', ':']
+    line_style_map = {category: available_line_styles[i] for i, category in enumerate(line_categories)}
+
+    # Plot each combination of color and marker, but avoid adding redundant legends
+    for line_category in line_categories:
+        for color_category in color_categories:
+            subset = df[(df['replicate'] == line_category) & (df['age'] == color_category)]
+            ax.plot(subset['apex_zone_length'], subset['apex_zone_contribution'], 
+                        color=colors[color_category], 
+                        linestyle=line_style_map[line_category])
+
+    ax.plot([], [], c="black", linestyle='', label="Plant ages (day)")
+
+    # Create the color legend separately
+    for color_category in color_categories:
+        ax.plot([], [], c=colors[color_category], linestyle='-', label=color_category)
+
+    ax.plot([], [], c="black", linestyle='', label="Replicates")
+
+    # Create the marker legend separately
+    for line_category in line_categories:
+        ax.plot([], [], c='black', linestyle=line_style_map[line_category], label=line_category)
+
+    ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
+    ax.set_xlabel('groupind distance from apex (m)')
+    ax.set_ylabel('exchange proportion')
+
+    fig.savefig(os.path.join(outputs_dirpath, f"apex_contribution.png"), dpi=720, bbox_inches="tight")
+
+    plt.close()
+
+
 
 def log_mtg_coordinates(g):
     def root_visitor(g, v, turtle, gravitropism_coefficient=0.06):
