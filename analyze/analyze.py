@@ -168,7 +168,8 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
 
         # Then scenario comparisions
         comparisions_dirpath = os.path.join(outputs_dirpath, "comparisions")
-        apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath)
+        apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="import_Nm", mean_and_std=True)
+        apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="Gross_AA_Exudation", mean_and_std=True)
         # #!!!!! R1 !!!!!
         # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="root_exchange_surface", metabolic_flow="import_Nm", 
         #                                    fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=False, x_max_down=2.5, x_max_up=4e-8)
@@ -1111,7 +1112,7 @@ def surface_repartition(dataset, output_dirpath, fps):
                    dpi=100)
 
 
-def apex_zone_contribution(d, output_dirpath, apex_zone_length, flow, summed_input, color_prop, plotting=True):
+def apex_zone_contribution(d, output_dirpath="", apex_zone_length=0.01, flow="", summed_input="", color_prop="", plotting=True):
     """
     Description : Computes two plots. First is the apex zone contribution to the overall selected zone. Apex zone length is user defined.
     Second plot shows for all vids summed when the apices group outperform the other segements relative to the length they represent.
@@ -1468,7 +1469,7 @@ def pipeline_compare_to_experimental_data(dataset, output_path):
     fig.savefig(os.path.join(output_path, "biomasses comparision.png"))
     plt.close()
 
-def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath):
+def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath, flow="import_Nm", mean_and_std=True):
 
     final_dataset = filter_dataset(dataset, time=dataset.t.max())
     
@@ -1489,9 +1490,8 @@ def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath):
         else:
             scenario_dataset = final_dataset
 
-        for azl in np.linspace(0, 0.15, num=10):
-            stabilized_value = apex_zone_contribution(d=scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=azl,
-                                flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="root_exchange_surface", plotting=False)
+        for azl in np.linspace(0, 0.15, num=100):
+            stabilized_value = apex_zone_contribution(d=scenario_dataset, apex_zone_length=azl, flow=flow, plotting=False)
             df = pd.concat([df, pd.DataFrame({"apex_zone_length":[azl], 
                                                 "apex_zone_contribution":[float(stabilized_value[0])],
                                                 "age":[age],
@@ -1518,12 +1518,25 @@ def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath):
     line_style_map = {category: available_line_styles[i] for i, category in enumerate(line_categories)}
 
     # Plot each combination of color and marker, but avoid adding redundant legends
-    for line_category in line_categories:
+    
+    if mean_and_std:
+        stat_df = df.groupby(['apex_zone_length', 'age'])['apex_zone_contribution'].agg(['mean', 'std']).reset_index()
+        print(stat_df)
         for color_category in color_categories:
-            subset = df[(df['replicate'] == line_category) & (df['age'] == color_category)]
-            ax.plot(subset['apex_zone_length'], subset['apex_zone_contribution'], 
-                        color=colors[color_category], 
-                        linestyle=line_style_map[line_category])
+            subset = stat_df[stat_df['age'] == color_category]
+            ax.plot(subset['apex_zone_length'], subset['mean'], 
+                            color=colors[color_category], 
+                            linestyle="-")
+            ax.fill_between(subset['apex_zone_length'], subset['mean'] - subset["std"], subset['mean'] + subset["std"], color=colors[color_category], alpha=0.2,)
+
+    else:
+        for color_category in color_categories:
+            for line_category in line_categories:
+                subset = df[(df['replicate'] == line_category) & (df['age'] == color_category)]
+                ax.plot(subset['apex_zone_length'], subset['apex_zone_contribution'], 
+                            color=colors[color_category], 
+                            linestyle=line_style_map[line_category])
+
 
     ax.plot([], [], c="black", linestyle='', label="Plant ages (day)")
 
@@ -1531,17 +1544,23 @@ def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath):
     for color_category in color_categories:
         ax.plot([], [], c=colors[color_category], linestyle='-', label=color_category)
 
-    ax.plot([], [], c="black", linestyle='', label="Replicates")
+    if not mean_and_std:
+        ax.plot([], [], c="black", linestyle='', label="Replicates")
 
-    # Create the marker legend separately
-    for line_category in line_categories:
-        ax.plot([], [], c='black', linestyle=line_style_map[line_category], label=line_category)
+        # Create the marker legend separately
+        for line_category in line_categories:
+            ax.plot([], [], c='black', linestyle=line_style_map[line_category], label=line_category)
 
     ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
     ax.set_xlabel('groupind distance from apex (m)')
     ax.set_ylabel('exchange proportion')
 
-    fig.savefig(os.path.join(outputs_dirpath, f"apex_contribution.png"), dpi=720, bbox_inches="tight")
+    if mean_and_std:
+        filename = f"mean_{flow}_apex_contribution.png"
+    else:
+        filename = f"raw_{flow}_apex_contribution.png"
+
+    fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
 
     plt.close()
 
