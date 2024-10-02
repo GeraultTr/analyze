@@ -108,7 +108,7 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         #dataset["Gross_C_Rhizodeposition"] = Indicators.Gross_C_Rhizodeposition(d=dataset)
         #dataset["Rhizodeposits_CN_Ratio"] = Indicators.Rhizodeposits_CN_Ratio(d=dataset)
         #dataset["CN_Ratio_Cumulated_Rhizodeposition"] = Indicators.CN_Ratio_Cumulated_Rhizodeposition(d=dataset)
-        dataset["z2"] = - dataset["z2"]
+        #dataset["z2"] = - dataset["z2"]
         dataset["Root_Hairs_Surface"] = Indicators.Root_Hairs_Surface(d=dataset)
         dataset["Root_Hairs_Proportion"] = Indicators.Root_Hairs_Proportion(d=dataset)
 
@@ -128,8 +128,9 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
                 scenario_dataset = filter_dataset(dataset, scenario=scenario)
             else:
                 scenario_dataset = dataset
-
-            #CN_balance_animation_pipeline(dataset=dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=False)
+            # print(scenario_dataset.where(scenario_dataset.distance_from_tip < 0.01, drop=True).where(scenario_dataset.z1 < -0.10, drop=True))
+            # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=False, target_vid=485)
+            # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=False, target_vid=395)
             #surface_repartition(dataset, output_dirpath=outputs_dirpath, fps=fps)
 
             # apex_zone_contribution(scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=0.05,
@@ -168,8 +169,9 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
 
         # Then scenario comparisions
         comparisions_dirpath = os.path.join(outputs_dirpath, "comparisions")
-        apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="import_Nm", mean_and_std=True)
-        apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="Gross_AA_Exudation", mean_and_std=True)
+        apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="import_Nm", final_time=48, mean_and_std=False)
+        apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="Gross_AA_Exudation", final_time=48, mean_and_std=False)
+
         # #!!!!! R1 !!!!!
         # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="root_exchange_surface", metabolic_flow="import_Nm", 
         #                                    fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=False, x_max_down=2.5, x_max_up=4e-8)
@@ -951,7 +953,7 @@ def xarray_deep_learning(dataset, mtg, global_state_extracts, global_flow_extrac
         run_analysis(file=dataset, output_path=output_dir, extract_props=pool_locals)
 
 
-def CN_balance_animation_pipeline(dataset, outputs_dirpath, fps, C_balance=True):
+def CN_balance_animation_pipeline(dataset, outputs_dirpath, fps, C_balance=True, target_vid=None):
     print("     [INFO] Producing balance animations...")
 
     if C_balance:
@@ -965,11 +967,11 @@ def CN_balance_animation_pipeline(dataset, outputs_dirpath, fps, C_balance=True)
     else:
         bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="AA",
                                       balance_dict=balance_dicts_no_C["AA"],
-                                      fps=fps)
+                                      fps=fps, fixed_ylim=5e-13, target_vid=target_vid)
 
         bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="Nm",
                                       balance_dict=balance_dicts_no_C["Nm"],
-                                      fps=fps)
+                                      fps=fps, fixed_ylim=8e-11, target_vid=target_vid)
     
     print("     [INFO] Finished")
 
@@ -1026,9 +1028,13 @@ def pie_balance_xarray_animations(dataset, output_dirpath, pool, balance_dict, i
 
 y_limits = [1e-10 for k in range(100)]
     
-def bar_balance_xarray_animations(dataset, output_dirpath, pool, balance_dict, input_composition=False, fps=15):
+def bar_balance_xarray_animations(dataset, output_dirpath, pool, balance_dict, input_composition=False, fps=15, fixed_ylim=None, target_vid=None):
+    if target_vid:
+        filtered_dataset = filter_dataset(d=dataset, vids=[target_vid])
+    else:
+        filtered_dataset = dataset
 
-    used_dataset = dataset[list(balance_dict.keys())].sum(dim="vid")
+    used_dataset = (filtered_dataset[list(balance_dict.keys())] / filtered_dataset.length).sum(dim="vid") 
 
     for name, meta in balance_dict.items():
         if meta["type"] == "output":
@@ -1082,12 +1088,21 @@ def bar_balance_xarray_animations(dataset, output_dirpath, pool, balance_dict, i
         
         y_limits = y_limits[1:] + [bottom]
 
-        ax[1].set_ylim(0, np.mean(y_limits)*2)
+        if fixed_ylim:
+            ax[1].set_ylim(0, fixed_ylim)
+        else:
+            ax[1].set_ylim(0, np.mean(y_limits)*2)
+        
         ax[1].legend(loc='best', bbox_to_anchor=(0.85, 1.025))
 
     animation = FuncAnimation(fig, update, frames=only_outputs.t[1:], repeat=False)
     FFwriter = FFMpegWriter(fps=fps, codec="mpeg4", bitrate=5000)
-    animation.save(os.path.join(output_dirpath, f"MTG_properties\MTG_properties_raw\{pool}_bars.mp4"), writer=FFwriter, dpi=100)
+    if target_vid:
+        filename = f"MTG_properties\MTG_properties_raw\{pool}_bars_on_{target_vid}.mp4"
+    else:
+        filename = f"MTG_properties\MTG_properties_raw\{pool}_bars.mp4"
+
+    animation.save(os.path.join(output_dirpath, filename), writer=FFwriter, dpi=100)
 
 def surface_repartition(dataset, output_dirpath, fps):
 
@@ -1142,7 +1157,7 @@ def apex_zone_contribution(d, output_dirpath="", apex_zone_length=0.01, flow="",
         fig.savefig(os.path.join(output_dirpath, f"apex_contribution_{flow}.png"))
         plt.close()
 
-    return apex_proportion
+    return apex_proportion, length_proportion
 
 def z_zone_contribution(fig, ax, dataset, zmin, zmax, flow, scenario="", mean_proportion=False,
                                                                     per_surface=False,
@@ -1227,7 +1242,10 @@ def filter_dataset(d, scenario=None, time=None, tmin=None, tmax=None, vids=[], o
             d = d.where(d.t <= tmax)
 
     if len(vids) > 0:
-        d = d.where(d.vid in vids)
+        condition = False
+        for vid in vids:
+            condition = condition or d.vid == vid
+        d = d.where(condition)
     
     if propmin and prop:
         d = d.where(d[prop] >= propmin)
@@ -1469,9 +1487,9 @@ def pipeline_compare_to_experimental_data(dataset, output_path):
     fig.savefig(os.path.join(output_path, "biomasses comparision.png"))
     plt.close()
 
-def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath, flow="import_Nm", mean_and_std=True):
+def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath, flow="import_Nm", grouped_geometry="length", final_time: int = 48, mean_and_std=True, length_proportion=True):
 
-    final_dataset = filter_dataset(dataset, time=dataset.t.max())
+    final_dataset = filter_dataset(dataset, time=final_time-1)
     
     # Dataframe storing computations
     df = pd.DataFrame()
@@ -1490,16 +1508,35 @@ def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath, flow="impo
         else:
             scenario_dataset = final_dataset
 
-        for azl in np.linspace(0, 0.15, num=100):
-            stabilized_value = apex_zone_contribution(d=scenario_dataset, apex_zone_length=azl, flow=flow, plotting=False)
-            df = pd.concat([df, pd.DataFrame({"apex_zone_length":[azl], 
-                                                "apex_zone_contribution":[float(stabilized_value[0])],
-                                                "age":[age],
-                                                "replicate":[replicate]
-                                                }
-                                                )
-                            ], ignore_index=True)
+        if length_proportion:
+            scenario_dataset = scenario_dataset.sum(dim="default")
+            total_length = scenario_dataset[grouped_geometry].sum(dim="vid")
+            total_flow = scenario_dataset[flow].sum(dim="vid")
+            sorted_dataset = scenario_dataset.sortby("distance_from_tip")
+            print(sorted_dataset["distance_from_tip"])
 
+            # Compute the cumulative sum over the sorted 'length' variable along the 'vid' dimension
+            cumulative_length_proportion = (sorted_dataset[grouped_geometry].cumsum(dim="vid") / total_length).to_numpy()
+            cumulative_flow_proportion = (sorted_dataset[flow].cumsum(dim="vid") / total_flow).to_numpy()
+
+            df = pd.concat([df, pd.DataFrame({"apex_zone_length":cumulative_length_proportion, 
+                                                "apex_zone_contribution":cumulative_flow_proportion,
+                                                "age":[age for _ in range(len(cumulative_length_proportion))],
+                                                "replicate":[replicate for _ in range(len(cumulative_length_proportion))]
+                                                }
+                                            )
+                            ], ignore_index=True)
+            
+        else:
+            for azl in np.linspace(0, 0.17, num=100):
+                stabilized_value, length_proportion = apex_zone_contribution(d=scenario_dataset, apex_zone_length=azl, flow=flow, plotting=False)
+                df = pd.concat([df, pd.DataFrame({"apex_zone_length":[azl], 
+                                                    "apex_zone_contribution":[float(stabilized_value[0])],
+                                                    "age":[age],
+                                                    "replicate":[replicate]
+                                                    }
+                                                    )
+                                ], ignore_index=True)
 
     fig, ax = plt.subplots()
 
@@ -1521,7 +1558,7 @@ def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath, flow="impo
     
     if mean_and_std:
         stat_df = df.groupby(['apex_zone_length', 'age'])['apex_zone_contribution'].agg(['mean', 'std']).reset_index()
-        print(stat_df)
+        
         for color_category in color_categories:
             subset = stat_df[stat_df['age'] == color_category]
             ax.plot(subset['apex_zone_length'], subset['mean'], 
@@ -1552,13 +1589,21 @@ def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath, flow="impo
             ax.plot([], [], c='black', linestyle=line_style_map[line_category], label=line_category)
 
     ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
-    ax.set_xlabel('groupind distance from apex (m)')
-    ax.set_ylabel('exchange proportion')
+    if length_proportion:
+        ax.set_xlabel(f'grouped {grouped_geometry} proportion from root apices')
+    else:
+        ax.set_xlabel('groupind distance from apex (m)')
+    ax.set_ylabel(f'{flow} exchange proportion')
+
+    if length_proportion:
+        suffix = f"{grouped_geometry}_proportion"
+    else:
+        suffix = "grouping_distance_from_apex"
 
     if mean_and_std:
-        filename = f"mean_{flow}_apex_contribution.png"
+        filename = f"mean_{flow}_apex_contribution=f({suffix}).png"
     else:
-        filename = f"raw_{flow}_apex_contribution.png"
+        filename = f"raw_{flow}_apex_contribution=f({suffix}).png"
 
     fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
 
