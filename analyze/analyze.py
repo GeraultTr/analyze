@@ -5,13 +5,16 @@ import imageio
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 # from pygifsicle import optimize
+from openalea.mtg.traversal import post_order2
 from openalea.mtg.plantframe import color
 from openalea.mtg import turtle as turt
 from math import floor, ceil, trunc, log10
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, FFMpegWriter
+from matplotlib.ticker import FuncFormatter
 import xarray as xr
+from pint import UnitRegistry
 import pyvista as pv
 from random import random
 
@@ -63,6 +66,7 @@ balance_dicts_no_C = {
                         diffusion_AA_soil={"type": "output", "conversion": 1.},
                         export_AA={"type": "output", "conversion": 1.},
                         AA_synthesis={"type": "input", "conversion": 1.},
+                        struct_synthesis={"type": "output", "conversion": 1},
                         storage_synthesis={"type": "output", "conversion": 65},
                         storage_catabolism={"type": "input", "conversion": 1 / 65},
                         AA_catabolism={"type": "output", "conversion": 1.}
@@ -74,12 +78,28 @@ balance_dicts_no_C = {
                     export_Nm={"type": "output", "conversion": 1.},
                     AA_synthesis={"type": "output", "conversion": 1.4},
                     AA_catabolism={"type": "input", "conversion": 1./1.4}),
+
+                "labile_N": dict(import_Nm={"type": "input", "conversion": 1.},
+                        diffusion_Nm_soil={"type": "output", "conversion": 1.},
+                        diffusion_Nm_xylem={"type": "input", "conversion": 1.},
+                        export_Nm={"type": "output", "conversion": 1.},
+                        diffusion_AA_phloem={"type": "input", "conversion": 1.},
+                        import_AA={"type": "input", "conversion": 1.},
+                        diffusion_AA_soil={"type": "output", "conversion": 1.},
+                        export_AA={"type": "output", "conversion": 1.},
+                        struct_synthesis={"type": "output", "conversion": 1},
+                        storage_synthesis={"type": "output", "conversion": 65},
+                        storage_catabolism={"type": "input", "conversion": 1 / 65}
+                        ),
+                        
                 "rhizodeposits": dict(Gross_AA_Exudation={"type": "output", "conversion": 1.})
                  }
 
+ureg = UnitRegistry()
+
 
 def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, animate_raw_logs=False, on_shoot_logs=False, on_performance=False,
-                 target_properties=None, **kwargs):
+                 target_properties=None, subdir_custom_name=None, **kwargs):
     # TODO if not available, return not performed
     print("[INFO] Starting data analysis")
     if on_sums:
@@ -87,6 +107,10 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             print("     [INFO] Producing 2D plots from summed and averaged properties")
             plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_summed"),
                     csv_name="plant_scale_properties.csv", properties=target_properties)
+            plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_summed"),
+                    csv_name="plant_scale_properties.csv", properties=["import_Nm", "diffusion_AA_soil"], stacked=True)
+            plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_summed"),
+                    csv_name="plant_scale_properties.csv", properties=["axial_export_water_up", "Nm_root_shoot_xylem", "AA_root_shoot_phloem_record"], stacked=True)
             print("     [INFO] Finished 2d plots")
     if on_raw_logs:
         print("     [INFO] Starting deep learning analysis on raw logs...")
@@ -111,6 +135,8 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         #dataset["z2"] = - dataset["z2"]
         dataset["Root_Hairs_Surface"] = Indicators.Root_Hairs_Surface(d=dataset)
         dataset["Root_Hairs_Proportion"] = Indicators.Root_Hairs_Proportion(d=dataset)
+        dataset["Labile_Nitrogen"] = Indicators.Labile_Nitrogen(d=dataset)
+        dataset["cylinder_surface"] = Indicators.cylinder_surface(d=dataset)
 
 
         # Z contributions
@@ -129,8 +155,8 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             else:
                 scenario_dataset = dataset
             # print(scenario_dataset.where(scenario_dataset.distance_from_tip < 0.01, drop=True).where(scenario_dataset.z1 < -0.10, drop=True))
-            # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=False, target_vid=485)
-            # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=False, target_vid=395)
+            # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=False, target_vid=122)
+            # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=False, target_vid=100)
             #surface_repartition(dataset, output_dirpath=outputs_dirpath, fps=fps)
 
             # apex_zone_contribution(scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=0.05,
@@ -168,10 +194,23 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
 
 
         # Then scenario comparisions
-        comparisions_dirpath = os.path.join(outputs_dirpath, "comparisions")
-        apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="import_Nm", final_time=48, mean_and_std=False)
-        apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="Gross_AA_Exudation", final_time=48, mean_and_std=False)
-
+        if subdir_custom_name:
+            comparisions_dirpath = os.path.join(outputs_dirpath, "comparisions", subdir_custom_name)
+            if not os.path.isdir(comparisions_dirpath):
+                os.mkdir(comparisions_dirpath)
+        else:
+            comparisions_dirpath = os.path.join(outputs_dirpath, "comparisions")
+        # apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="import_Nm", final_time=48, mean_and_std=True, x_proportion=True)
+        # apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="Gross_AA_Exudation", final_time=48, mean_and_std=True, x_proportion=True)
+        # dataset = filter_dataset(dataset, prop="root_order", propis=1)
+        apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="import_Nm", grouped_geometry="cylinder_surface", final_time=48, mean_and_std=True, x_proportion=True)
+        # root_length_x_percent_contributors(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="import_Nm", grouped_geometry="length", final_time=48, mean_and_std=True, x_proportion=True)
+        #top_percent_contributors(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="import_Nm", grouped_geometry="cylinder_surface", unit="m**2", final_time=48, mean_and_std=False)
+        #top_percent_contributors(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="import_Nm", grouped_geometry="cylinder_surface", unit="m**2", final_time=48, mean_and_std=True)
+        
+        #apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="Gross_AA_Exudation", grouped_geometry="struct_mass", final_time=48, mean_and_std=True, x_proportion=True)
+        #apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="radial_import_water", grouped_geometry="struct_mass", final_time=48, mean_and_std=True, x_proportion=True)
+        
         # #!!!!! R1 !!!!!
         # pipeline_compare_z_bins_animations(dataset=dataset, scenarios=scenarios, output_path=comparisions_dirpath, prop="root_exchange_surface", metabolic_flow="import_Nm", 
         #                                    fps=fps, t_start=12, t_stop=max(scenario_dataset.t.values)-12, step=24, stride=24, mean_and_std=False, x_max_down=2.5, x_max_up=4e-8)
@@ -225,20 +264,111 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario), csv_name="simulation_performance.csv", stacked=True)
             print(" [INFO] Finished plotting performances")
 
+
+def test_output_range(outputs_dirpath, scenarios, test_file_dirpath):
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    RESET = "\033[0m"
+
+    print("\n")
+    print(f"{GREEN}LAUNCHING {scenarios[0]} OUTPUT RANGE CHECKS...{RESET}")
+    print("\n")
+
+    dataset = open_and_merge_datasets(scenarios=scenarios, root_outputs_path=outputs_dirpath)
+
+    # remove the very first step where all fluxes are 0.
+    dataset = dataset.where(dataset.t > 0).dropna(dim='t', how='all')
+
+    test_df = pd.read_excel(test_file_dirpath)
+    test_df = test_df.replace({np.nan: None})
+
+    failed_tests = 0
+    passed_tests = 0
+
+    for test_row in test_df.iterrows():
+        row = test_row[1].to_dict()
+
+        output_name = str(row["output"])
+        if hasattr(dataset, output_name):
+            observed_min = float(row["min"])
+            observed_max = float(row["max"])
+            normalization_variable = row["normalize_by"]
+            checks = dict(check_single_values	= bool(row["check_single_values"]),
+                        check_sum = bool(row["check_sum"]),
+                        check_mean = bool(row["check_mean"]))  
+
+            for check, check_value in checks.items():
+                if check == "check_single_values" and check_value:
+                    if normalization_variable:
+                        target_name = f"{output_name}_normalized"
+                        dataset[target_name] = dataset[output_name] / dataset[normalization_variable]
+                    else:
+                        target_name = output_name
+
+                    test = (observed_min <= dataset[target_name]) & (dataset[target_name] <= observed_max)
+                    if False in test:
+                        print(f"{target_name} outside boundaries for {dataset[target_name].where(~test).dropna(dim='vid', how='all').dropna(dim='t', how='all')}")
+                        failed_tests += 1
+                    else:
+                        passed_tests += 1
+
+                if check == "check_sum" and check_value:
+                        
+                    total_dataset = dataset.sum(dim="vid")
+                    if normalization_variable:
+                        target_name = f"{output_name}_normalized"
+                        total_dataset[target_name] = total_dataset[output_name] / dataset[normalization_variable].sum(dim="vid")
+                    else:
+                        target_name = output_name
+                    test = (observed_min <= total_dataset[target_name]) & (total_dataset[target_name] <= observed_max) 
+                    if False in test:
+                        print(f"Total {target_name} outside boundaries for {total_dataset[target_name].where(~test).dropna(dim='t', how='all')}")
+                        failed_tests += 1
+                    else:
+                        passed_tests += 1
+
+                if check == "check_mean" and check_value:
+
+                    if normalization_variable:
+                        target_name = f"{output_name}_normalized"
+                        dataset[target_name] = dataset[output_name] / dataset[normalization_variable]
+                    else:
+                        target_name = output_name
+
+                    total_dataset = dataset.mean(dim="vid")
+                    test = (observed_min <= total_dataset[target_name]) & (total_dataset[target_name] <= observed_max) 
+                    if False in test:
+                        print(f"Mean {target_name} outside boundaries for {total_dataset[target_name].where(~test).dropna(dim='t', how='all')}")
+                        failed_tests += 1
+                    else:
+                        passed_tests += 1
+        else:
+            print(f"{output_name} check is invalid")
+            failed_tests += 1
+
+    print(f"\n{RED}FAILED : {failed_tests}{RESET}")
+    print(f"{GREEN}PASSED : {passed_tests}{RESET}\n")
+
+
+
+    return
+
+def scientific_formatter(x, pos):
+    return f'{x:.0e}'
+
 def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
     log = pd.read_csv(os.path.join(csv_dirpath, csv_name))
 
     units = log.iloc[0]
 
     # Ignore unit value for plots and initialization values for plots' readability
-    log = log[1:].astype(float)
+    log = log[3:].astype(float)
 
     plot_path = os.path.join(csv_dirpath, "plots")
 
-    if os.path.isdir(plot_path):
+    if os.path.isdir(plot_path) and not stacked:
         shutil.rmtree(plot_path)
-
-    os.mkdir(plot_path)
+        os.mkdir(plot_path)
 
     if properties is None:
         properties = log.columns
@@ -246,6 +376,11 @@ def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
     if stacked:
         fig, ax = plt.subplots()
 
+    plot_number = 0
+    twin_axes = {}
+    twin_legends = {}
+
+    default_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
     for prop in properties:
         if prop in log.columns and prop != "Unnamed: 0":
             if len(prop) > 15:
@@ -254,20 +389,40 @@ def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
                 label = prop
             if not stacked:
                 fig, ax = plt.subplots()
-            ax.plot(log.index.values, log[prop], label=label)
-            if not stacked:
+
+            if stacked:
+                if plot_number == 0:
+                    ax.plot(log.index.values, log[prop], label=label, c=default_colors[plot_number])
+                else:
+                    twin_axes[plot_number] = ax.twinx()
+                    twin_axes[plot_number].yaxis.set_major_formatter(FuncFormatter(scientific_formatter))
+                    twin_axes[plot_number].tick_params(axis='y', rotation=45)
+                    twin_axes[plot_number].spines['right'].set_position(('outward', (plot_number-1) * 70))
+                    twin_axes[plot_number].plot(log.index.values, log[prop], label=label, c=default_colors[plot_number])
+                    twin_legends[plot_number] = twin_axes[plot_number].legend(loc='center right', bbox_to_anchor=(1.2 + (plot_number - 1) * 0.23, 0.5), handlelength=1)
+                    for text in twin_legends[plot_number].get_texts():
+                        text.set_rotation(90)
+            
+            else:
+                ax.plot(log.index.values, log[prop], label=label)
                 ax.set_title(f"{prop} ({units.loc[prop]})")
                 ax.set_xlabel("t (h)")
-                ax.ticklabel_format(axis='y', useOffset=True, style="sci", scilimits=(0, 0))
+                #ax.ticklabel_format(axis='y', useOffset=True, style="sci", scilimits=(0, 0))
                 fig.savefig(os.path.join(plot_path, prop + ".png"))
                 plt.close()
+            
+            plot_number += 1
 
     if stacked:
-        ax.legend()
-        ax.set_title(f"{prop} ({units.loc[prop]})")
+        legend = ax.legend(loc='center left', bbox_to_anchor=(-0.25, 0.5), handlelength=1)
+        for text in legend.get_texts():
+            text.set_rotation(90)
+        ax.yaxis.set_major_formatter(FuncFormatter(scientific_formatter))
+        ax.tick_params(axis='y', rotation=45)
+        #ax.set_title(f"Stack_of_{properties}")
         ax.set_xlabel("t (h)")
-        ax.ticklabel_format(axis='y', useOffset=True, style="sci", scilimits=(0, 0))
-        fig.savefig(os.path.join(plot_path, prop + ".png"))
+        #ax.ticklabel_format(axis='y', useOffset=True, style="sci", scilimits=(0, 0))
+        fig.savefig(os.path.join(plot_path, f"Stack_of_{properties}.png"), bbox_inches="tight")
         plt.close()
 
 
@@ -965,13 +1120,17 @@ def CN_balance_animation_pipeline(dataset, outputs_dirpath, fps, C_balance=True,
         bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="Nm", balance_dict=balance_dicts_C["Nm"],
                           fps=fps)
     else:
+        bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="Labile_Nitrogen",
+                                      balance_dict=balance_dicts_no_C["labile_N"],
+                                      fps=fps, fixed_ylim=3e-9, target_vid=target_vid)
+        
         bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="AA",
                                       balance_dict=balance_dicts_no_C["AA"],
-                                      fps=fps, fixed_ylim=5e-13, target_vid=target_vid)
+                                      fps=fps, fixed_ylim=5e-10, target_vid=target_vid)
 
         bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="Nm",
                                       balance_dict=balance_dicts_no_C["Nm"],
-                                      fps=fps, fixed_ylim=8e-11, target_vid=target_vid)
+                                      fps=fps, fixed_ylim=3e-10, target_vid=target_vid)
     
     print("     [INFO] Finished")
 
@@ -1059,8 +1218,8 @@ def bar_balance_xarray_animations(dataset, output_dirpath, pool, balance_dict, i
         global y_limits
         ax[0].clear()
         to_plot = np.array(only_inputs.sel(t=time)).reshape(1, -1)[0]
-        ds_mean = dataset[pool].mean(dim="vid")
-        ds_std = dataset[pool].std(dim="vid")
+        ds_mean = filtered_dataset[pool].mean(dim="vid")
+        ds_std = filtered_dataset[pool].std(dim="vid")
         ax[0].plot([time, time], [0, ds_mean.max()], c="r")
         ax[0].fill_between(ds_mean.t, (ds_mean-ds_std).values[0], (ds_mean+ds_std).values[0])
         ds_mean.plot.line(x="t", ax=ax[0], c="b")
@@ -1223,7 +1382,7 @@ def compare_to_exp_biomass_pipeline(dataset, output_path):
     plt.close()
 
 
-def filter_dataset(d, scenario=None, time=None, tmin=None, tmax=None, vids=[], only_keep=None, prop=None, propmin=None, propmax=None):
+def filter_dataset(d, scenario=None, time=None, tmin=None, tmax=None, vids=[], only_keep=None, prop=None, propmin=None, propmax=None, propis=None):
     
     if scenario:
         
@@ -1252,6 +1411,9 @@ def filter_dataset(d, scenario=None, time=None, tmin=None, tmax=None, vids=[], o
     
     if propmax and prop:
         d = d.where(d[prop] <= propmax)
+
+    if propis and prop:
+        d = d.where(d[prop] == propis)
 
     return d
 
@@ -1487,7 +1649,7 @@ def pipeline_compare_to_experimental_data(dataset, output_path):
     fig.savefig(os.path.join(output_path, "biomasses comparision.png"))
     plt.close()
 
-def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath, flow="import_Nm", grouped_geometry="length", final_time: int = 48, mean_and_std=True, length_proportion=True):
+def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath, flow="import_Nm", grouped_geometry="length", final_time: int = 48, mean_and_std=True, x_proportion=True):
 
     final_dataset = filter_dataset(dataset, time=final_time-1)
     
@@ -1507,13 +1669,12 @@ def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath, flow="impo
             scenario_dataset = filter_dataset(final_dataset, scenario=scenario)
         else:
             scenario_dataset = final_dataset
-
-        if length_proportion:
+        
+        if x_proportion:
             scenario_dataset = scenario_dataset.sum(dim="default")
             total_length = scenario_dataset[grouped_geometry].sum(dim="vid")
-            total_flow = scenario_dataset[flow].sum(dim="vid")
+            total_flow = abs(scenario_dataset[flow]).sum(dim="vid")
             sorted_dataset = scenario_dataset.sortby("distance_from_tip")
-            print(sorted_dataset["distance_from_tip"])
 
             # Compute the cumulative sum over the sorted 'length' variable along the 'vid' dimension
             cumulative_length_proportion = (sorted_dataset[grouped_geometry].cumsum(dim="vid") / total_length).to_numpy()
@@ -1530,12 +1691,12 @@ def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath, flow="impo
         else:
             for azl in np.linspace(0, 0.17, num=100):
                 stabilized_value, length_proportion = apex_zone_contribution(d=scenario_dataset, apex_zone_length=azl, flow=flow, plotting=False)
-                df = pd.concat([df, pd.DataFrame({"apex_zone_length":[azl], 
+                df = pd.concat([df, pd.DataFrame({"apex_zone_length":[float(length_proportion[0])], 
                                                     "apex_zone_contribution":[float(stabilized_value[0])],
                                                     "age":[age],
                                                     "replicate":[replicate]
                                                     }
-                                                    )
+                                                )
                                 ], ignore_index=True)
 
     fig, ax = plt.subplots()
@@ -1545,7 +1706,7 @@ def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath, flow="impo
     line_categories = df['replicate'].unique()
 
     import matplotlib.cm as cm
-
+    
     # Choose a colormap and normalize it based on the number of categories
     colormap = cm.get_cmap('viridis', len(color_categories))  # You can choose any other colormap like 'plasma', 'coolwarm'
     colors = {category: colormap(i) for i, category in enumerate(color_categories)}
@@ -1557,14 +1718,26 @@ def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath, flow="impo
     # Plot each combination of color and marker, but avoid adding redundant legends
     
     if mean_and_std:
-        stat_df = df.groupby(['apex_zone_length', 'age'])['apex_zone_contribution'].agg(['mean', 'std']).reset_index()
         
         for color_category in color_categories:
+            # Variable bin number in case a root system is too small for bin meaning
+            # TODO : almost working
+            # bin_number = len(df[(df["age"] == color_category) & (df["apex_zone_length"] > 0.)]) / len(df[df["age"] == color_category]["replicate"].unique())
+            # bin_edges = np.linspace(0, 1, num=int(bin_number / 2))
+            bin_edges = np.linspace(0, 1, num=50)
+
+            df['bin'] = pd.cut(df['apex_zone_length'], bins=bin_edges, labels=False)
+            bin_centers = bin_edges[:-1] + np.diff(bin_edges) / 2  # Calculate midpoints
+
+            stat_df = df.groupby(['bin', 'age'])['apex_zone_contribution'].agg(['mean', 'std']).reset_index()
+            stat_df['bin_center'] = stat_df['bin'].map(dict(enumerate(bin_centers)))  # Map bin centers
+
             subset = stat_df[stat_df['age'] == color_category]
-            ax.plot(subset['apex_zone_length'], subset['mean'], 
+
+            ax.plot(subset['bin_center'], subset['mean'], 
                             color=colors[color_category], 
                             linestyle="-")
-            ax.fill_between(subset['apex_zone_length'], subset['mean'] - subset["std"], subset['mean'] + subset["std"], color=colors[color_category], alpha=0.2,)
+            ax.fill_between(subset['bin_center'], subset['mean'] - subset["std"], subset['mean'] + subset["std"], color=colors[color_category], alpha=0.2,)
 
     else:
         for color_category in color_categories:
@@ -1589,13 +1762,13 @@ def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath, flow="impo
             ax.plot([], [], c='black', linestyle=line_style_map[line_category], label=line_category)
 
     ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
-    if length_proportion:
+    if x_proportion:
         ax.set_xlabel(f'grouped {grouped_geometry} proportion from root apices')
     else:
         ax.set_xlabel('groupind distance from apex (m)')
     ax.set_ylabel(f'{flow} exchange proportion')
 
-    if length_proportion:
+    if x_proportion:
         suffix = f"{grouped_geometry}_proportion"
     else:
         suffix = "grouping_distance_from_apex"
@@ -1609,6 +1782,198 @@ def apex_zone_contribution_final(dataset, scenarios, outputs_dirpath, flow="impo
 
     plt.close()
 
+
+def root_length_x_percent_contributors(dataset, scenarios, outputs_dirpath, flow="import_Nm", grouped_geometry="length", proportion_of_geometry=0.1, final_time: int = 48, mean_and_std=True, x_proportion=True, histogram_organizer="distance_from_tip", ):
+
+    final_dataset = filter_dataset(dataset, time=final_time-1)
+    
+    # Dataframe storing computations
+    df = pd.DataFrame()
+
+    fig, ax = plt.subplots()
+
+    # First individual analyses
+    for scenario in scenarios:
+        find_day = scenario.find("_D")
+        replicate = scenario[find_day-2:find_day]
+        age = float(scenario[find_day+2:])
+        print(f"Processing replicate {replicate} at age {age} days...")
+
+        if len(scenarios) > 1:
+            scenario_dataset = filter_dataset(final_dataset, scenario=scenario)
+        else:
+            scenario_dataset = final_dataset
+        
+        scenario_dataset = scenario_dataset.sum(dim="default")
+
+        # Computing totals in case proportion of total is to be computed
+        total_flow = abs(scenario_dataset[flow]).sum(dim="vid")
+        total_geometry = scenario_dataset[grouped_geometry].sum(dim="vid")
+
+        scenario_dataset[f"{grouped_geometry}_proportion"] = scenario_dataset[grouped_geometry] / total_geometry
+        scenario_dataset[f"{flow}_proportion"] = scenario_dataset[flow] / total_flow
+
+        # Bins along 
+        bins = np.linspace(0., scenario_dataset["distance_from_tip"].max(), 40)
+
+        binned_data = scenario_dataset.groupby_bins(scenario_dataset["distance_from_tip"], bins).sum(dim="vid")
+
+        binned_data["distance_from_tip"] = scenario_dataset.groupby_bins(scenario_dataset["distance_from_tip"], bins).mean(dim="vid")["distance_from_tip"]
+        binned_data = binned_data.sortby(binned_data["distance_from_tip"], ascending=True)
+
+        sorted_binned_data = binned_data.sortby(binned_data[f"{flow}_proportion"], ascending=False)
+
+        colors = []
+
+        last_bin_to_split = True
+        tests = sorted_binned_data[f"{grouped_geometry}_proportion"].cumsum() < proportion_of_geometry
+        
+        for test in (sorted_binned_data[f"{grouped_geometry}_proportion"].cumsum() < proportion_of_geometry).values:
+            if test:
+                colors.append("red")
+
+            else:
+                if (len(colors) == 0 or colors[-1] == "red") and last_bin_to_split:
+                    colors.append("red")
+                    last_bin_to_split = False
+                else:
+                    colors.append("blue")
+
+        sorted_binned_data["color"] = xr.DataArray(colors, dims="distance_from_tip_bins", coords={"distance_from_tip_bins": sorted_binned_data["distance_from_tip_bins"]})
+        extract = sorted_binned_data.where(sorted_binned_data["color"] == "red")
+        
+        grouped_length_prop = extract[f"{grouped_geometry}_proportion"].sum()
+        grouped_flux_prop = extract[f"{flow}_proportion"].sum()
+        print(grouped_length_prop, grouped_flux_prop)
+
+        sorted_colors = sorted_binned_data.sortby(sorted_binned_data["distance_from_tip"], ascending=True)["color"].values
+
+        bin_centers = [(bins[i] + bins[i + 1]) / 2 for i in range(len(bins) - 1)]
+
+        ax.bar(bin_centers, binned_data[f"{flow}_proportion"].values, width=bins[1] - bins[0], color=sorted_colors)
+
+    #plt.show()
+
+    fig.savefig(os.path.join(outputs_dirpath, f"top_{int(proportion_of_geometry*100)}%_contributors_histo.png"), dpi=720, bbox_inches="tight")
+
+    plt.close()
+
+
+def top_percent_contributors(dataset, scenarios, outputs_dirpath, flow="import_Nm", grouped_geometry="length", unit="m", proportion_of_geometry=0.1, final_time: int = 48, mean_and_std=True, plotting_along="distance_from_tip"):
+
+    final_dataset = filter_dataset(dataset, time=final_time-1)
+
+    fig, ax = plt.subplots()
+    ax.xaxis.set_major_formatter(FuncFormatter(scientific_formatter))
+    ax.yaxis.set_major_formatter(FuncFormatter(scientific_formatter))
+
+    replicate = []
+    age = []
+    for scenario in scenarios:
+        find_day = scenario.find("_D")
+        replicate.append(scenario[find_day-2:find_day])
+        age.append(float(scenario[find_day+2:]))
+
+    x_unit = "m"
+    flow_unit = ureg("mol") / ureg("s")
+    flow_unit_norm = flow_unit / ureg(unit)
+    y_unit = f"{flow_unit_norm.units:~P}"
+
+    import matplotlib.cm as cm
+    import matplotlib.markers as mrk
+    
+    color_categories = np.unique(age)
+    style_categories = np.unique(replicate)
+
+    # Choose a colormap and normalize it based on the number of categories
+    colormap = cm.get_cmap('viridis', len(color_categories))
+    markermap = list(mrk.MarkerStyle.markers.keys())
+    exceptions = [".", ","]
+    for marker in exceptions:
+        markermap.remove(marker)
+
+    colors = {category: colormap(i) for i, category in enumerate(color_categories)}
+    style = {category: markermap[i] for i, category in enumerate(style_categories)}
+
+    # First individual analyses
+    for scenario in scenarios:
+        find_day = scenario.find("_D")
+        replicate = scenario[find_day-2:find_day]
+        age = float(scenario[find_day+2:])
+        print(f"Processing replicate {replicate} at age {age} days...")
+
+        if len(scenarios) > 1:
+            scenario_dataset = filter_dataset(final_dataset, scenario=scenario)
+        else:
+            scenario_dataset = final_dataset
+        
+        scenario_dataset = scenario_dataset.sum(dim="default")
+
+        # Computing totals in case proportion of total is to be computed
+        total_flow = abs(scenario_dataset[flow]).sum(dim="vid")
+        total_geometry = scenario_dataset[grouped_geometry].sum(dim="vid")
+
+        scenario_dataset[f"{grouped_geometry}_proportion"] = scenario_dataset[grouped_geometry] / total_geometry
+        scenario_dataset[f"{flow}_proportion"] = scenario_dataset[flow] / total_flow
+
+        scenario_dataset[f"{flow}_per_geometry"] = scenario_dataset[flow] / (scenario_dataset[grouped_geometry] *(2 * np.pi * scenario_dataset["radius"]))
+        # scenario_dataset[f"{flow}_per_length"] = scenario_dataset[flow] / scenario_dataset["length"]
+
+        cumsummed_dataset = scenario_dataset.sortby(scenario_dataset[f"{flow}_per_geometry"], ascending = False)
+
+        cumsummed_dataset[grouped_geometry] = (cumsummed_dataset[grouped_geometry] / total_geometry).cumsum(dim="vid")
+
+        cropped_dataset = cumsummed_dataset.where(cumsummed_dataset[grouped_geometry] <= proportion_of_geometry)
+        
+        group_contribution = cropped_dataset[flow].sum(dim="vid") / total_flow
+        
+        if mean_and_std:
+            ax.errorbar(cropped_dataset[plotting_along].mean(), cropped_dataset[f"{flow}_per_geometry"].mean(),
+                        xerr=cropped_dataset[plotting_along].std(), yerr=cropped_dataset[f"{flow}_per_geometry"].std(),
+                        fmt=style[replicate], color=colors[age])
+        else:
+            ax.scatter(cropped_dataset[plotting_along].values, cropped_dataset[f"{flow}_per_geometry"].values, marker=style[replicate], color=colors[age])
+        
+        if mean_and_std:
+            # Get the current axis limits
+            x_limits = plt.gca().get_xlim()
+            y_limits = plt.gca().get_ylim()
+
+            # Calculate the offset based on the axis range (e.g., 1% of the range)
+            x_offset = (x_limits[1] - x_limits[0]) * 0.01
+            y_offset = (y_limits[1] - y_limits[0]) * 0.01
+            ax.text(cropped_dataset[plotting_along].mean() + x_offset, cropped_dataset[f"{flow}_per_geometry"].mean() + y_offset,
+                            f"10% = {round(float(group_contribution)*100, 1)}% {flow}".replace("_", " "), fontsize=7)
+
+    
+    ax.plot([], [], c="black", linestyle='', label="Plant ages (day)")
+
+    # Create the color legend separately
+    for color_category in color_categories:
+        ax.scatter([], [], c=colors[color_category], marker="s", label=color_category)
+
+    ax.plot([], [], c="black", linestyle='', label="Replicates")
+
+    # Create the marker legend separately
+    for line_category in style_categories:
+        ax.scatter([], [], c='black', marker=style[line_category], label=line_category)
+
+    ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
+
+    ax.set_xlabel(f'{plotting_along} ({x_unit})'.replace("_", " "))
+    ax.set_ylabel(f'{flow} flow per root {grouped_geometry} ({y_unit})'.replace("_", " "))
+    fig.suptitle(f"Position of the top {int(100*proportion_of_geometry)}% most active root {grouped_geometry} according to {plotting_along}".replace("_", " "))
+    
+    #plt.show()
+
+    if mean_and_std:
+        filename = f"mean_{flow}_for_{int(100*proportion_of_geometry)}%_{grouped_geometry}=f({plotting_along}).png"
+    else:
+        filename = f"raw_{flow}_for_{int(100*proportion_of_geometry)}%_{grouped_geometry}=f({plotting_along}).png"
+
+    fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
+
+    plt.close()
 
 
 def log_mtg_coordinates(g):
@@ -1746,6 +2111,27 @@ def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen
 
     plotter.screenshot(os.path.join(output_dirpath, f'{property}_plot_snapshot.png'))
 
+def add_root_order_when_branching_is_wrong(g):
+    root_gen = g.component_roots_at_scale_iter(g.root, scale=1)
+    root = next(root_gen)
+    g.properties().setdefault("root_order", {})
+    root_order = g.property("root_order")
+    radius = g.property("radius")
+    # We travel in the MTG from the root tips to the base:
+    known_vids = []
+    for vid in post_order2(g, root):
+        if vid not in known_vids:
+            axis = g.Axis(vid)
+            axis_mean_radius = np.mean([radius[v] for v in axis])
+            if axis_mean_radius > 1e-4 and len(axis) > 10:
+                order = 1
+            else:
+                order = 2
+            for v in axis:
+                root_order[v] = order
+
+            known_vids += axis
+
 
 
 class Indicators:
@@ -1812,3 +2198,10 @@ class Indicators:
     
     def Root_Hairs_Proportion(d):
         return d.Root_Hairs_Surface / d.root_exchange_surface.where(d.root_exchange_surface > 0.)
+    
+    def Labile_Nitrogen(d):
+        "Mol of Nitrogen per gram of dry mass for all labile nitrogen forms (nitrate, amonium, amino acids, ...)"
+        return d.Nm + d.AA * 1.4
+    
+    def cylinder_surface(d):
+        return d.length * (2 * np.pi * d.radius)
