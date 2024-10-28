@@ -17,6 +17,7 @@ import xarray as xr
 from pint import UnitRegistry
 import pyvista as pv
 from random import random
+import warnings
 
 from log.visualize import plot_mtg, plot_xr, custom_colorbar
 import openalea.plantgl.all as pgl
@@ -265,7 +266,17 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             print(" [INFO] Finished plotting performances")
 
 
+
 def test_output_range(outputs_dirpath, scenarios, test_file_dirpath):
+
+    # List to store warnings
+    logged_warnings = []
+
+    # Custom warning handler to capture warnings without real-time output
+    def capture_warning(message, category, filename, lineno, file=None, line=None):
+        warning_msg = f"{filename}:{lineno}: {category.__name__}: {message}"
+        logged_warnings.append(warning_msg)
+
     RED = "\033[31m"
     GREEN = "\033[32m"
     RESET = "\033[0m"
@@ -284,77 +295,86 @@ def test_output_range(outputs_dirpath, scenarios, test_file_dirpath):
 
     failed_tests = 0
     passed_tests = 0
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.showwarning = capture_warning
 
-    for test_row in test_df.iterrows():
-        row = test_row[1].to_dict()
+        for test_row in test_df.iterrows():
+            row = test_row[1].to_dict()
 
-        output_name = str(row["output"])
-        if hasattr(dataset, output_name):
-            observed_min = float(row["min"])
-            observed_max = float(row["max"])
-            normalization_variable = row["normalize_by"]
-            checks = dict(check_single_values	= bool(row["check_single_values"]),
-                        check_sum = bool(row["check_sum"]),
-                        check_mean = bool(row["check_mean"]))  
+            output_name = str(row["output"])
+            if hasattr(dataset, output_name):
+                observed_min = float(row["min"])
+                observed_max = float(row["max"])
+                normalization_variable = row["normalize_by"]
+                checks = dict(check_single_values	= bool(row["check_single_values"]),
+                            check_sum = bool(row["check_sum"]),
+                            check_mean = bool(row["check_mean"]),
+                            check_correlation = row["expected_correlation_with"])
+                positive_correlation = bool(row["positive_correlation"])
 
-            for check, check_value in checks.items():
-                if check == "check_single_values" and check_value:
-                    if normalization_variable:
-                        target_name = f"{output_name}_normalized"
-                        dataset[target_name] = dataset[output_name] / dataset[normalization_variable]
-                    else:
-                        target_name = output_name
+                for check, check_value in checks.items():
+                    if check == "check_single_values" and check_value:
+                        if normalization_variable:
+                            target_name = f"{output_name}_normalized"
+                            dataset[target_name] = dataset[output_name] / dataset[normalization_variable]
+                        else:
+                            target_name = output_name
 
-                    test = (observed_min <= dataset[target_name]) & (dataset[target_name] <= observed_max)
-                    if False in test:
-                        print(f"{target_name} outside boundaries for {dataset[target_name].where(~test).dropna(dim='vid', how='all').dropna(dim='t', how='all')}")
-                        failed_tests += 1
-                    else:
-                        passed_tests += 1
+                        test = (observed_min <= dataset[target_name]) & (dataset[target_name] <= observed_max)
+                        if False in test:
+                            warnings.warn(f"\n{RED}{target_name}{RESET} outside boundaries for {dataset[target_name].where(~test).dropna(dim='vid', how='all').dropna(dim='t', how='all')}\n", UserWarning)
+                            failed_tests += 1
+                        else:
+                            passed_tests += 1
 
-                if check == "check_sum" and check_value:
-                        
-                    total_dataset = dataset.sum(dim="vid")
-                    if normalization_variable:
-                        target_name = f"{output_name}_normalized"
-                        total_dataset[target_name] = total_dataset[output_name] / dataset[normalization_variable].sum(dim="vid")
-                    else:
-                        target_name = output_name
-                    test = (observed_min <= total_dataset[target_name]) & (total_dataset[target_name] <= observed_max) 
-                    if False in test:
-                        print(f"Total {target_name} outside boundaries for {total_dataset[target_name].where(~test).dropna(dim='t', how='all')}")
-                        failed_tests += 1
-                    else:
-                        passed_tests += 1
+                    if check == "check_sum" and check_value:
+                        total_dataset = dataset.sum(dim="vid")
+                        if normalization_variable:
+                            target_name = f"{output_name}_normalized"
+                            total_dataset[target_name] = total_dataset[output_name] / dataset[normalization_variable].sum(dim="vid")
+                        else:
+                            target_name = output_name
+                        test = (observed_min <= total_dataset[target_name]) & (total_dataset[target_name] <= observed_max) 
+                        if False in test:
+                            warnings.warn(f"\n{RED}Total {target_name}{RESET} outside boundaries for {total_dataset[target_name].where(~test).dropna(dim='t', how='all')}\n", UserWarning)
+                            failed_tests += 1
+                        else:
+                            passed_tests += 1
 
-                if check == "check_mean" and check_value:
+                    if check == "check_mean" and check_value:
+                        if normalization_variable:
+                            target_name = f"{output_name}_normalized"
+                            dataset[target_name] = dataset[output_name] / dataset[normalization_variable]
+                        else:
+                            target_name = output_name
 
-                    if normalization_variable:
-                        target_name = f"{output_name}_normalized"
-                        dataset[target_name] = dataset[output_name] / dataset[normalization_variable]
-                    else:
-                        target_name = output_name
+                        total_dataset = dataset.mean(dim="vid")
+                        test = (observed_min <= total_dataset[target_name]) & (total_dataset[target_name] <= observed_max) 
+                        if False in test:
+                            warnings.warn(f"\n{RED}Mean {target_name}{RESET} outside boundaries for {total_dataset[target_name].where(~test).dropna(dim='t', how='all')}\n", UserWarning)
+                            failed_tests += 1
+                        else:
+                            passed_tests += 1
+            else:
+                print(f"{output_name} check is invalid")
+                failed_tests += 1
 
-                    total_dataset = dataset.mean(dim="vid")
-                    test = (observed_min <= total_dataset[target_name]) & (total_dataset[target_name] <= observed_max) 
-                    if False in test:
-                        print(f"Mean {target_name} outside boundaries for {total_dataset[target_name].where(~test).dropna(dim='t', how='all')}")
-                        failed_tests += 1
-                    else:
-                        passed_tests += 1
-        else:
-            print(f"{output_name} check is invalid")
-            failed_tests += 1
+        print(f"\n{RED}FAILED : {failed_tests}{RESET}")
+        print(f"{GREEN}PASSED : {passed_tests}{RESET}\n")
 
-    print(f"\n{RED}FAILED : {failed_tests}{RESET}")
-    print(f"{GREEN}PASSED : {passed_tests}{RESET}\n")
+        show_more = input("Show related warnings? [y]/n")
+        if show_more in ("y", ""):
+            ct = 1
+            for warning in logged_warnings:
+                print(f"\n{RED}Warning {ct}:{RESET}")
+                print(warning)
+                ct += 1
 
-
-
-    return
 
 def scientific_formatter(x, pos):
     return f'{x:.0e}'
+
 
 def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
     log = pd.read_csv(os.path.join(csv_dirpath, csv_name))
