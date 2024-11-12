@@ -108,10 +108,10 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             print("     [INFO] Producing 2D plots from summed and averaged properties")
             plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_summed"),
                     csv_name="plant_scale_properties.csv", properties=target_properties)
-            plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_summed"),
-                    csv_name="plant_scale_properties.csv", properties=["import_Nm", "diffusion_AA_soil"], stacked=True)
-            plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_summed"),
-                    csv_name="plant_scale_properties.csv", properties=["axial_export_water_up", "Nm_root_shoot_xylem", "AA_root_shoot_phloem_record"], stacked=True)
+            # plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_summed"),
+            #         csv_name="plant_scale_properties.csv", properties=["import_Nm", "diffusion_AA_soil"], stacked=True)
+            # plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_summed"),
+            #         csv_name="plant_scale_properties.csv", properties=["axial_export_water_up", "Nm_root_shoot_xylem", "AA_root_shoot_phloem_record"], stacked=True)
             print("     [INFO] Finished 2d plots")
     if on_raw_logs:
         print("     [INFO] Starting deep learning analysis on raw logs...")
@@ -156,8 +156,8 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             else:
                 scenario_dataset = dataset
             # print(scenario_dataset.where(scenario_dataset.distance_from_tip < 0.01, drop=True).where(scenario_dataset.z1 < -0.10, drop=True))
-            # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=False, target_vid=122)
-            # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=False, target_vid=100)
+            CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=True, target_vid=122)
+            CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=True, target_vid=100)
             #surface_repartition(dataset, output_dirpath=outputs_dirpath, fps=fps)
 
             # apex_zone_contribution(scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=0.05,
@@ -204,7 +204,7 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
         # apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="import_Nm", final_time=48, mean_and_std=True, x_proportion=True)
         # apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="Gross_AA_Exudation", final_time=48, mean_and_std=True, x_proportion=True)
         # dataset = filter_dataset(dataset, prop="root_order", propis=1)
-        apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="import_Nm", grouped_geometry="cylinder_surface", final_time=48, mean_and_std=True, x_proportion=True)
+        # apex_zone_contribution_final(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="import_Nm", grouped_geometry="cylinder_surface", final_time=48, mean_and_std=True, x_proportion=True)
         # root_length_x_percent_contributors(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="import_Nm", grouped_geometry="length", final_time=48, mean_and_std=True, x_proportion=True)
         #top_percent_contributors(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="import_Nm", grouped_geometry="cylinder_surface", unit="m**2", final_time=48, mean_and_std=False)
         #top_percent_contributors(dataset=dataset, scenarios=scenarios, outputs_dirpath=comparisions_dirpath, flow="import_Nm", grouped_geometry="cylinder_surface", unit="m**2", final_time=48, mean_and_std=True)
@@ -385,9 +385,12 @@ def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
     log = log[3:].astype(float)
 
     plot_path = os.path.join(csv_dirpath, "plots")
-
+    
     if os.path.isdir(plot_path) and not stacked:
         shutil.rmtree(plot_path)
+        os.mkdir(plot_path)
+
+    if not os.path.isdir(plot_path):
         os.mkdir(plot_path)
 
     if properties is None:
@@ -530,6 +533,9 @@ def plot_compare_xarray_vertical_bins(fig, ax, grouped_ds, bins_center, prop, bi
 
 def cnwheat_plot_csv(csv_dirpath):
     plot_path = os.path.join(csv_dirpath, "plots")
+
+    if not os.path.isdir(csv_dirpath):
+        os.mkdir(csv_dirpath)
 
     if os.path.isdir(plot_path):
         shutil.rmtree(plot_path)
@@ -1132,13 +1138,17 @@ def CN_balance_animation_pipeline(dataset, outputs_dirpath, fps, C_balance=True,
     print("     [INFO] Producing balance animations...")
 
     if C_balance:
-        bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="C_hexose_root", balance_dict=balance_dicts_C["hexose"], fps=fps)
+        bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="C_hexose_root", balance_dict=balance_dicts_C["hexose"], fps=fps, fixed_ylim=None, target_vid=target_vid)
+
+        bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="Labile_Nitrogen",
+                                      balance_dict=balance_dicts_no_C["labile_N"],
+                                      fps=fps, fixed_ylim=None, target_vid=target_vid)
 
         bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="AA", balance_dict=balance_dicts_C["AA"],
-                          fps=fps)
+                          fps=fps, fixed_ylim=5e-10, target_vid=target_vid)
 
         bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="Nm", balance_dict=balance_dicts_C["Nm"],
-                          fps=fps)
+                          fps=fps, fixed_ylim=3e-10, target_vid=target_vid)
     else:
         bar_balance_xarray_animations(dataset, output_dirpath=outputs_dirpath, pool="Labile_Nitrogen",
                                       balance_dict=balance_dicts_no_C["labile_N"],

@@ -1,5 +1,6 @@
 README.md
 setup.py
+analyze/__init__.py
 analyze/analyze.py
 analyze.egg-info/PKG-INFO
 analyze.egg-info/SOURCES.txt
