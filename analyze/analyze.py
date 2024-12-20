@@ -259,6 +259,8 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             cnwheat_plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/shoot_properties"))
             print(" [INFO] Finished  CN-Wheat plots")
 
+            print(" [INFO] Starting postprocessing on CN-Wheat outputs...")
+
     if on_performance:
         for scenario in scenarios:
             print(" [INFO] Analysing running performances...")
@@ -561,6 +563,19 @@ def cnwheat_plot_csv(csv_dirpath):
                                 elements_outputs_df=df_elt,
                                 soils_outputs_df=df_soil,
                                 delta_t=delta_t)
+    
+    save_postprocessing = True
+    if save_postprocessing:
+        postprocessing_dirpath = os.path.join(csv_dirpath, "postprocessing")
+        if not os.path.exists(postprocessing_dirpath):
+            # Then we create it:
+            os.mkdir(postprocessing_dirpath)
+
+        pp_df_ax.to_csv(os.path.join(postprocessing_dirpath, "axes_postprocessing.csv"), na_rep='NA', index=False, float_format='%.{}f'.format(8))
+        pp_df_hz.to_csv(os.path.join(postprocessing_dirpath, "hiddenzones_postprocessing.csv"), na_rep='NA', index=False, float_format='%.{}f'.format(8))
+        pp_df_org.to_csv(os.path.join(postprocessing_dirpath, "organs_postprocessing.csv"), na_rep='NA', index=False, float_format='%.{}f'.format(8))
+        pp_df_elt.to_csv(os.path.join(postprocessing_dirpath, "elements_postprocessing.csv"), na_rep='NA', index=False, float_format='%.{}f'.format(8))
+        pp_df_soil.to_csv(os.path.join(postprocessing_dirpath, "soil_postprocessing.csv"), na_rep='NA', index=False, float_format='%.{}f'.format(8))
 
     cnwheat_facade.CNWheatFacade.graphs(
         axes_postprocessing_df=pp_df_ax,
