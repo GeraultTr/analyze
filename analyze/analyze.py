@@ -384,7 +384,7 @@ def scientific_formatter(x, pos):
     return f'{x:.0e}'
 
 
-def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
+def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False, twin=False):
     log = pd.read_csv(os.path.join(csv_dirpath, csv_name))
 
     units = log.iloc[0]
@@ -412,6 +412,14 @@ def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
     twin_legends = {}
 
     default_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    colormap = plt.cm.tab20
+
+    # Generate evenly spaced values between 0 and 1
+    color_indices = np.linspace(0, 1, len(properties))
+
+    # Sample the colormap to create the list of custom colors
+    default_colors = [colormap(i) for i in color_indices]
+
     for prop in properties:
         if prop in log.columns and prop != "Unnamed: 0":
             if len(prop) > 15:
@@ -422,14 +430,14 @@ def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
                 fig, ax = plt.subplots()
 
             if stacked:
-                if plot_number == 0:
+                if plot_number == 0 or not twin:
                     ax.plot(log.index.values, log[prop], label=label, c=default_colors[plot_number])
                 else:
                     twin_axes[plot_number] = ax.twinx()
                     twin_axes[plot_number].yaxis.set_major_formatter(FuncFormatter(scientific_formatter))
                     twin_axes[plot_number].tick_params(axis='y', rotation=45)
                     twin_axes[plot_number].spines['right'].set_position(('outward', (plot_number-1) * 70))
-                    twin_axes[plot_number].plot(log.index.values, log[prop], label=label, c=default_colors[plot_number])
+                    twin_axes[plot_number].plot(log.index.values, log[prop], label=label, c=default_colors[plot_number]) 
                     twin_legends[plot_number] = twin_axes[plot_number].legend(loc='center right', bbox_to_anchor=(1.2 + (plot_number - 1) * 0.23, 0.5), handlelength=1)
                     for text in twin_legends[plot_number].get_texts():
                         text.set_rotation(90)
@@ -445,15 +453,23 @@ def plot_csv(csv_dirpath, csv_name, properties=None, stacked=False):
             plot_number += 1
 
     if stacked:
-        legend = ax.legend(loc='center left', bbox_to_anchor=(-0.25, 0.5), handlelength=1)
-        for text in legend.get_texts():
-            text.set_rotation(90)
+        if twin:
+            legend = ax.legend(loc='center left', bbox_to_anchor=(-0.25, 0.5), handlelength=1)
+            for text in legend.get_texts():
+                text.set_rotation(90)
+        else:
+            ax.legend(loc='center left', bbox_to_anchor=(-0.5, 0.5))
         ax.yaxis.set_major_formatter(FuncFormatter(scientific_formatter))
         ax.tick_params(axis='y', rotation=45)
         #ax.set_title(f"Stack_of_{properties}")
         ax.set_xlabel("t (h)")
         #ax.ticklabel_format(axis='y', useOffset=True, style="sci", scilimits=(0, 0))
-        fig.savefig(os.path.join(plot_path, f"Stack_of_{properties}.png"), bbox_inches="tight")
+        if len(str(properties)) <= 20:
+            filename = properties
+        else:
+            filename = "many_steps"
+
+        fig.savefig(os.path.join(plot_path, f"Stack_of_{filename}.png"), bbox_inches="tight")
         plt.close()
 
 
