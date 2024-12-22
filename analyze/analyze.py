@@ -22,6 +22,8 @@ import warnings
 from log.visualize import plot_mtg, plot_xr, custom_colorbar
 import openalea.plantgl.all as pgl
 
+from analyze.workflow.cnwheat_comparisions import compare_shoot_outputs
+
 
 
 balance_dicts_C = {"hexose": dict(hexose_exudation={"type": "output", "conversion": 1.},
@@ -99,7 +101,7 @@ balance_dicts_no_C = {
 ureg = UnitRegistry()
 
 
-def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, animate_raw_logs=False, on_shoot_logs=False, on_performance=False,
+def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_raw_logs=False, animate_raw_logs=False, on_shoot_logs=False, on_performance=False,
                  target_properties=None, subdir_custom_name=None, **kwargs):
     # TODO if not available, return not performed
     print("[INFO] Starting data analysis")
@@ -259,7 +261,11 @@ def analyze_data(scenarios, outputs_dirpath, on_sums=False, on_raw_logs=False, a
             cnwheat_plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/shoot_properties"))
             print(" [INFO] Finished  CN-Wheat plots")
 
-            print(" [INFO] Starting postprocessing on CN-Wheat outputs...")
+            print(" [INFO] Starting comparision plots on CN-Wheat outputs...")
+            compare_shoot_outputs(reference_dirpath=os.path.join(inputs_dirpath, "postprocessing"),
+                                  newsimu_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/shoot_properties"),
+                                  meteo_data_dirpath=os.path.join(inputs_dirpath, "meteo_Ljutovac2002.csv"))
+            print(" [INFO] Finished comparision plots on CN-Wheat outputs...")
 
     if on_performance:
         for scenario in scenarios:
