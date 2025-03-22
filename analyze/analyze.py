@@ -22,6 +22,7 @@ from matplotlib.animation import FuncAnimation, FFMpegWriter
 from matplotlib.ticker import FuncFormatter
 import xarray as xr
 from pint import UnitRegistry
+import re
 import pyvista as pv
 from random import random
 import warnings
@@ -147,7 +148,9 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
         dataset["Root_Hairs_Proportion"] = Indicators.Root_Hairs_Proportion(d=dataset)
         dataset["Labile_Nitrogen"] = Indicators.Labile_Nitrogen(d=dataset)
         dataset["cylinder_surface"] = Indicators.cylinder_surface(d=dataset)
-
+        dataset["Net mineral N uptake"] = Indicators.compute(d=dataset, formula="import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - diffusion_Nm_soil_xylem")
+        dataset["Lengthy mineral N uptake"] = Indicators.compute(d=dataset, formula="(import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - diffusion_Nm_soil_xylem) / length")
+        dataset["Massic mineral N uptake"] = Indicators.compute(d=dataset, formula="(import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - diffusion_Nm_soil_xylem) / struct_mass")
 
         # Z contributions
         zcontrib_flow = "import_Nm"
@@ -157,7 +160,14 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
         #print(dataset.root_order)
 
         # First individual analyses
+        oldest_scenario = scenarios[-1]
+        oldest_dataset = filter_dataset(dataset, scenario=oldest_scenario)
+        step = 0.03
+        distance_bins = np.arange(oldest_dataset["distance_from_tip"].min(), 
+                                  oldest_dataset["distance_from_tip"].max() + step, step)
+        scenario_times = dict(zip(scenarios, dataset.t.values))
         for scenario in scenarios:
+            print(f"[INFO] Processing scenario {scenario}")
             raw_dirpath = os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_raw/")
             mtg_dirpath = os.path.join(outputs_dirpath, scenario, "MTG_files/")
 
@@ -166,17 +176,17 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
             else:
                 scenario_dataset = dataset
 
-            recolorize_glb(100, scenario_dataset, property="Nm", glb_dirpath="", 
-                           colormap="jet")
+            # recolorize_glb(100, scenario_dataset, property="Nm", glb_dirpath="", 
+            #                colormap="jet")
+            # try:
+            #     # RootCyNAPSFigures.Fig_1_c(scenario_dataset, raw_dirpath)
+            #     # RootCyNAPSFigures.Fig_1_d(scenario_dataset, raw_dirpath)
+            #     RootCyNAPSFigures.Fig_2(scenario_dataset, raw_dirpath)
+            # except:
+            #     print(f"Figure creation failed for scenario {scenario}")
 
-            final_dataset = scenario_dataset.sel(t=239)
-
-            fig, ax = plt.subplots()
-
-            ax.scatter(final_dataset.distance_from_tip.values[0], (final_dataset.import_Nm / final_dataset.struct_mass).values[0], c=final_dataset.root_exchange_surface.values[0])
-
-            plt.savefig(os.path.join(outputs_dirpath, "fig.png"))
-
+            final_dataset = scenario_dataset.sel(t=scenario_times[scenario])[["distance_from_tip", "root_order", "struct_mass", "Net mineral N uptake"]]
+            RootCyNAPSFigures.Fig_2(final_dataset, raw_dirpath, distance_bins)
 
             # print(scenario_dataset.where(scenario_dataset.distance_from_tip < 0.01, drop=True).where(scenario_dataset.z1 < -0.10, drop=True))
             # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=True, target_vid=122)
@@ -309,172 +319,172 @@ def test_output_range(outputs_dirpath, scenarios, test_file_dirpath):
     RED = "\033[31m"
     GREEN = "\033[32m"
     RESET = "\033[0m"
+    for scenario in scenarios:
+        print("\n")
+        print(f"{GREEN}LAUNCHING {scenario} OUTPUT RANGE CHECKS...{RESET}")
+        print("\n")
 
-    print("\n")
-    print(f"{GREEN}LAUNCHING {scenarios[0]} OUTPUT RANGE CHECKS...{RESET}")
-    print("\n")
+        dataset = open_and_merge_datasets(scenarios=[scenario], root_outputs_path=outputs_dirpath)
 
-    dataset = open_and_merge_datasets(scenarios=scenarios, root_outputs_path=outputs_dirpath)
+        # remove the very first step where all fluxes are 0
+        dataset = dataset.where(dataset.t > 0).dropna(dim='t', how='all')
 
-    # remove the very first step where all fluxes are 0
-    dataset = dataset.where(dataset.t > 0).dropna(dim='t', how='all')
+        test_df = pd.read_excel(test_file_dirpath)
+        test_df = test_df.replace({np.nan: None})
 
-    test_df = pd.read_excel(test_file_dirpath)
-    test_df = test_df.replace({np.nan: None})
+        failed_tests = 0
+        passed_tests = 0
+        failed_names = []
+        passed_names = []
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.showwarning = capture_warning
 
-    failed_tests = 0
-    passed_tests = 0
-    failed_names = []
-    passed_names = []
-    with warnings.catch_warnings():
-        warnings.simplefilter("always")
-        warnings.showwarning = capture_warning
+            for test_row in test_df.iterrows():
+                row = test_row[1].to_dict()
 
-        for test_row in test_df.iterrows():
-            row = test_row[1].to_dict()
+                output_name = str(row["output"])
+                if "+" in output_name or "-" in output_name or "*" in output_name or "/" in output_name:
+                    # the variable doesn't exist and has to be computed
+                    dataset[output_name] = eval(output_name, {}, dataset)
+                if hasattr(dataset, output_name):
+                    observed_min = float(row["min"])
+                    observed_max = float(row["max"])
+                    normalization_variable = row["normalize_by"]
+                    checks = dict(check_single_values	= bool(row["check_single_values"]),
+                                check_collar = bool(row["check_collar"]),
+                                check_sum = bool(row["check_sum"]),
+                                check_mean = bool(row["check_mean"]),
+                                check_correlation = row["expected_correlation_with"])
+                    positive_correlation = bool(row["positive_correlation"])
 
-            output_name = str(row["output"])
-            if "+" in output_name or "-" in output_name or "*" in output_name or "/" in output_name:
-                # the variable doesn't exist and has to be computed
-                dataset[output_name] = eval(output_name, {}, dataset)
-            if hasattr(dataset, output_name):
-                observed_min = float(row["min"])
-                observed_max = float(row["max"])
-                normalization_variable = row["normalize_by"]
-                checks = dict(check_single_values	= bool(row["check_single_values"]),
-                            check_collar = bool(row["check_collar"]),
-                            check_sum = bool(row["check_sum"]),
-                            check_mean = bool(row["check_mean"]),
-                            check_correlation = row["expected_correlation_with"])
-                positive_correlation = bool(row["positive_correlation"])
+                    for check, check_value in checks.items():
+                        if check == "check_single_values" and check_value:
+                            if normalization_variable:
+                                target_name = f"{output_name}_to_{normalization_variable}"
+                                dataset[target_name] = dataset[output_name] / dataset[normalization_variable]
+                            else:
+                                target_name = output_name
 
-                for check, check_value in checks.items():
-                    if check == "check_single_values" and check_value:
-                        if normalization_variable:
-                            target_name = f"{output_name}_to_{normalization_variable}"
-                            dataset[target_name] = dataset[output_name] / dataset[normalization_variable]
-                        else:
-                            target_name = output_name
+                            test = (observed_min <= dataset[target_name]) & (dataset[target_name] <= observed_max)
+                            if False in test and dataset[target_name].where(~test).dropna(dim='vid', how='all').dropna(dim='t', how='all').values.size > 0:
+                                shown_df = dataset[target_name].where(~test).dropna(dim='vid', how='all').dropna(dim='t', how='all').to_dataframe()
 
-                        test = (observed_min <= dataset[target_name]) & (dataset[target_name] <= observed_max)
-                        if False in test and dataset[target_name].where(~test).dropna(dim='vid', how='all').dropna(dim='t', how='all').values.size > 0:
-                            shown_df = dataset[target_name].where(~test).dropna(dim='vid', how='all').dropna(dim='t', how='all').to_dataframe()
+                                warnings.warn(f"\n{RED}{target_name}{RESET} outside boundaries for {shown_df.unstack(level=1)}\n", UserWarning)
+                                failed_tests += 1
+                                failed_names.append(target_name)
+                            else:
+                                passed_tests += 1
+                                passed_names.append(target_name)
 
-                            warnings.warn(f"\n{RED}{target_name}{RESET} outside boundaries for {shown_df.unstack(level=1)}\n", UserWarning)
-                            failed_tests += 1
-                            failed_names.append(target_name)
-                        else:
-                            passed_tests += 1
-                            passed_names.append(target_name)
+                        if check == "check_collar" and check_value:
+                            if normalization_variable:
+                                target_name = f"{output_name}_to_{normalization_variable}"
+                                dataset[target_name] = dataset[output_name] / dataset[normalization_variable].sum(dim="vid")
+                            else:
+                                target_name = output_name
+                            
+                            test_low = observed_min <= dataset[target_name].sel(vid=1)
+                            test_high = dataset[target_name].sel(vid=1) <= observed_max
+                            test = test_low & test_high
+                            rejection_lower = round(((test_low == False).sum() / dataset[target_name].size).values * 100, 1)
+                            rejection_higher = round(((test_high == False).sum() / dataset[target_name].size).values * 100, 1)
+                            rejection_suffix = ""
+                            if rejection_lower != 0:
+                                min_error_time = min(test_low.t.where(~test_low).dropna(dim='t', how='all').t.values)
+                                max_error_time = max(test_low.t.where(~test_low).dropna(dim='t', how='all').t.values)
+                                rejection_suffix = rejection_suffix + f"{rejection_lower}% too-low ({min_error_time}-{max_error_time}h),"
+                            if rejection_higher != 0:
+                                min_error_time = min(test_high.t.where(~test_high).dropna(dim='t', how='all').t.values)
+                                max_error_time = max(test_high.t.where(~test_high).dropna(dim='t', how='all').t.values)
+                                rejection_suffix = rejection_suffix + f"{rejection_higher}% too-high ({min_error_time}-{max_error_time}h),"
 
-                    if check == "check_collar" and check_value:
-                        if normalization_variable:
-                            target_name = f"{output_name}_to_{normalization_variable}"
-                            dataset[target_name] = dataset[output_name] / dataset[normalization_variable].sum(dim="vid")
-                        else:
-                            target_name = output_name
-                        
-                        test_low = observed_min <= dataset[target_name].sel(vid=1)
-                        test_high = dataset[target_name].sel(vid=1) <= observed_max
-                        test = test_low & test_high
-                        rejection_lower = round(((test_low == False).sum() / dataset[target_name].size).values * 100, 1)
-                        rejection_higher = round(((test_high == False).sum() / dataset[target_name].size).values * 100, 1)
-                        rejection_suffix = ""
-                        if rejection_lower != 0:
-                            min_error_time = min(test_low.t.where(~test_low).dropna(dim='t', how='all').t.values)
-                            max_error_time = max(test_low.t.where(~test_low).dropna(dim='t', how='all').t.values)
-                            rejection_suffix = rejection_suffix + f"{rejection_lower}% too-low ({min_error_time}-{max_error_time}h),"
-                        if rejection_higher != 0:
-                            min_error_time = min(test_high.t.where(~test_high).dropna(dim='t', how='all').t.values)
-                            max_error_time = max(test_high.t.where(~test_high).dropna(dim='t', how='all').t.values)
-                            rejection_suffix = rejection_suffix + f"{rejection_higher}% too-high ({min_error_time}-{max_error_time}h),"
+                            if False in test and dataset[target_name].where(~test).dropna(dim='vid', how='all').dropna(dim='t', how='all').values.size > 0:
+                                warnings.warn(f"\n{RED}{target_name}{RESET} outside boundaries for {dataset[target_name].where(~test).dropna(dim='vid', how='all').dropna(dim='t', how='all').sel(vid=1).to_dataframe()}\n", UserWarning)
+                                failed_tests += 1
+                                failed_names.append(f"collar_{target_name} : {rejection_suffix}")
+                            else:
+                                passed_tests += 1
+                                passed_names.append(f"collar_{target_name}")
 
-                        if False in test and dataset[target_name].where(~test).dropna(dim='vid', how='all').dropna(dim='t', how='all').values.size > 0:
-                            warnings.warn(f"\n{RED}{target_name}{RESET} outside boundaries for {dataset[target_name].where(~test).dropna(dim='vid', how='all').dropna(dim='t', how='all').sel(vid=1).to_dataframe()}\n", UserWarning)
-                            failed_tests += 1
-                            failed_names.append(f"collar_{target_name} : {rejection_suffix}")
-                        else:
-                            passed_tests += 1
-                            passed_names.append(f"collar_{target_name}")
+                        if check == "check_sum" and check_value:
+                            total_dataset = dataset.sum(dim="vid")
+                            if normalization_variable:
+                                target_name = f"{output_name}_to_{normalization_variable}"
+                                total_dataset[target_name] = total_dataset[output_name] / dataset[normalization_variable].sum(dim="vid")
+                            else:
+                                target_name = output_name
 
-                    if check == "check_sum" and check_value:
-                        total_dataset = dataset.sum(dim="vid")
-                        if normalization_variable:
-                            target_name = f"{output_name}_to_{normalization_variable}"
-                            total_dataset[target_name] = total_dataset[output_name] / dataset[normalization_variable].sum(dim="vid")
-                        else:
-                            target_name = output_name
+                            test_low = observed_min <= total_dataset[target_name]
+                            test_high = total_dataset[target_name] <= observed_max
+                            test = test_low & test_high
 
-                        test_low = observed_min <= total_dataset[target_name]
-                        test_high = total_dataset[target_name] <= observed_max
-                        test = test_low & test_high
+                            rejection_lower = round(((test_low == False).sum() / total_dataset[target_name].size).values * 100, 1)
+                            rejection_higher = round(((test_high == False).sum() / total_dataset[target_name].size).values * 100, 1)
+                            rejection_suffix = ""
+                            if rejection_lower != 0:
+                                min_error_time = min(test_low.t.where(~test_low).dropna(dim='t', how='all').t.values)
+                                max_error_time = max(test_low.t.where(~test_low).dropna(dim='t', how='all').t.values)
+                                rejection_suffix = rejection_suffix + f"{rejection_lower}% too-low ({min_error_time}-{max_error_time}h),"
+                            if rejection_higher != 0:
+                                min_error_time = min(test_high.t.where(~test_high).dropna(dim='t', how='all').t.values)
+                                max_error_time = max(test_high.t.where(~test_high).dropna(dim='t', how='all').t.values)
+                                rejection_suffix = rejection_suffix + f"{rejection_higher}% too-high ({min_error_time}-{max_error_time}h),"
 
-                        rejection_lower = round(((test_low == False).sum() / total_dataset[target_name].size).values * 100, 1)
-                        rejection_higher = round(((test_high == False).sum() / total_dataset[target_name].size).values * 100, 1)
-                        rejection_suffix = ""
-                        if rejection_lower != 0:
-                            min_error_time = min(test_low.t.where(~test_low).dropna(dim='t', how='all').t.values)
-                            max_error_time = max(test_low.t.where(~test_low).dropna(dim='t', how='all').t.values)
-                            rejection_suffix = rejection_suffix + f"{rejection_lower}% too-low ({min_error_time}-{max_error_time}h),"
-                        if rejection_higher != 0:
-                            min_error_time = min(test_high.t.where(~test_high).dropna(dim='t', how='all').t.values)
-                            max_error_time = max(test_high.t.where(~test_high).dropna(dim='t', how='all').t.values)
-                            rejection_suffix = rejection_suffix + f"{rejection_higher}% too-high ({min_error_time}-{max_error_time}h),"
+                            if False in test and total_dataset[target_name].where(~test).dropna(dim='t', how='all').values.size > 0:
+                                warnings.warn(f"\n{RED}Total {target_name}{RESET} outside boundaries for {total_dataset[target_name].where(~test).dropna(dim='t', how='all').to_dataframe()}\n", UserWarning)
+                                failed_tests += 1
+                                failed_names.append(f"sum_{target_name} : {rejection_suffix}")
+                            else:
+                                passed_tests += 1
+                                passed_names.append(f"sum_{target_name}")
 
-                        if False in test and total_dataset[target_name].where(~test).dropna(dim='t', how='all').values.size > 0:
-                            warnings.warn(f"\n{RED}Total {target_name}{RESET} outside boundaries for {total_dataset[target_name].where(~test).dropna(dim='t', how='all').to_dataframe()}\n", UserWarning)
-                            failed_tests += 1
-                            failed_names.append(f"sum_{target_name} : {rejection_suffix}")
-                        else:
-                            passed_tests += 1
-                            passed_names.append(f"sum_{target_name}")
+                        if check == "check_mean" and check_value:
+                            if normalization_variable:
+                                target_name = f"{output_name}_to_{normalization_variable}"
+                                dataset[target_name] = dataset[output_name] / dataset[normalization_variable]
+                            else:
+                                target_name = output_name
 
-                    if check == "check_mean" and check_value:
-                        if normalization_variable:
-                            target_name = f"{output_name}_to_{normalization_variable}"
-                            dataset[target_name] = dataset[output_name] / dataset[normalization_variable]
-                        else:
-                            target_name = output_name
+                            total_dataset = dataset.mean(dim="vid")
+                            
+                            test_low = observed_min <= total_dataset[target_name]
+                            test_high = total_dataset[target_name] <= observed_max
+                            test = test_low & test_high
 
-                        total_dataset = dataset.mean(dim="vid")
-                        
-                        test_low = observed_min <= total_dataset[target_name]
-                        test_high = total_dataset[target_name] <= observed_max
-                        test = test_low & test_high
+                            rejection_lower = round(((test_low == False).sum() / total_dataset[target_name].size).values * 100, 1)
+                            rejection_higher = round(((test_high == False).sum() / total_dataset[target_name].size).values * 100, 1)
+                            rejection_suffix = ""
+                            if rejection_lower != 0:
+                                min_error_time = min(test_low.t.where(~test_low).dropna(dim='t', how='all').t.values)
+                                max_error_time = max(test_low.t.where(~test_low).dropna(dim='t', how='all').t.values)
+                                rejection_suffix = rejection_suffix + f"{rejection_lower}% too-low ({min_error_time}-{max_error_time}h),"
+                            if rejection_higher != 0:
+                                min_error_time = min(test_high.t.where(~test_high).dropna(dim='t', how='all').t.values)
+                                max_error_time = max(test_high.t.where(~test_high).dropna(dim='t', how='all').t.values)
+                                rejection_suffix = rejection_suffix + f"{rejection_higher}% too-high ({min_error_time}-{max_error_time}h),"
 
-                        rejection_lower = round(((test_low == False).sum() / total_dataset[target_name].size).values * 100, 1)
-                        rejection_higher = round(((test_high == False).sum() / total_dataset[target_name].size).values * 100, 1)
-                        rejection_suffix = ""
-                        if rejection_lower != 0:
-                            min_error_time = min(test_low.t.where(~test_low).dropna(dim='t', how='all').t.values)
-                            max_error_time = max(test_low.t.where(~test_low).dropna(dim='t', how='all').t.values)
-                            rejection_suffix = rejection_suffix + f"{rejection_lower}% too-low ({min_error_time}-{max_error_time}h),"
-                        if rejection_higher != 0:
-                            min_error_time = min(test_high.t.where(~test_high).dropna(dim='t', how='all').t.values)
-                            max_error_time = max(test_high.t.where(~test_high).dropna(dim='t', how='all').t.values)
-                            rejection_suffix = rejection_suffix + f"{rejection_higher}% too-high ({min_error_time}-{max_error_time}h),"
+                            if False in test and dataset[target_name].where(~test).dropna(dim='vid', how='all').dropna(dim='t', how='all').values.size > 0:
+                                warnings.warn(f"\n{RED}Mean {target_name}{RESET} outside boundaries for {total_dataset[target_name].where(~test).dropna(dim='t', how='all').to_dataframe()}\n", UserWarning)
+                                failed_tests += 1
+                                failed_names.append(f"mean_{target_name} : {rejection_suffix}")
+                            else:
+                                passed_tests += 1
+                                passed_names.append(f"mean_{target_name}")
+                else:
+                    print(f"{output_name} check is invalid")
+                    failed_tests += 1
 
-                        if False in test and dataset[target_name].where(~test).dropna(dim='vid', how='all').dropna(dim='t', how='all').values.size > 0:
-                            warnings.warn(f"\n{RED}Mean {target_name}{RESET} outside boundaries for {total_dataset[target_name].where(~test).dropna(dim='t', how='all').to_dataframe()}\n", UserWarning)
-                            failed_tests += 1
-                            failed_names.append(f"mean_{target_name} : {rejection_suffix}")
-                        else:
-                            passed_tests += 1
-                            passed_names.append(f"mean_{target_name}")
-            else:
-                print(f"{output_name} check is invalid")
-                failed_tests += 1
+            print(f"\n{RED}FAILED : {failed_tests} {failed_names}{RESET}")
+            print(f"{GREEN}PASSED : {passed_tests} {passed_names}{RESET}\n")
 
-        print(f"\n{RED}FAILED : {failed_tests} {failed_names}{RESET}")
-        print(f"{GREEN}PASSED : {passed_tests} {passed_names}{RESET}\n")
-
-        show_more = input("Show related warnings? [y]/n")
-        if show_more in ("y", ""):
-            ct = 1
-            for warning in logged_warnings:
-                print(f"\n{RED}Warning {ct}:{RESET}")
-                print(warning)
-                ct += 1
+            show_more = input("Show related warnings? [y]/n")
+            if show_more in ("y", ""):
+                ct = 1
+                for warning in logged_warnings:
+                    print(f"\n{RED}Warning {ct}:{RESET}")
+                    print(warning)
+                    ct += 1
 
 
 def scientific_formatter(x, pos):
@@ -2021,7 +2031,7 @@ def root_length_x_percent_contributors(dataset, scenarios, outputs_dirpath, flow
     fig.savefig(os.path.join(outputs_dirpath, f"top_{int(proportion_of_geometry*100)}%_contributors_histo.png"), dpi=720, bbox_inches="tight")
 
     plt.close()
-
+    
 
 def top_percent_contributors(dataset, scenarios, outputs_dirpath, flow="import_Nm", grouped_geometry="length", unit="m", proportion_of_geometry=0.1, final_time: int = 48, mean_and_std=True, plotting_along="distance_from_tip"):
 
@@ -2337,8 +2347,93 @@ def recolorize_glb(time_step, dataset, property, glb_dirpath, colormap):
 
 
 
+class RootCyNAPSFigures:
 
+    def Fig_1_c(scenario_dataset, outputs_path):
+        final_time = max(scenario_dataset.t.values)
+        final_dataset = scenario_dataset.sel(t=final_time)
 
+        XarrayPlotting.scatter_xarray(final_dataset, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lengthy Net mineral N uptake", c="root_order", s=1, name_suffix=f"_{final_time}")
+        XarrayPlotting.scatter_xarray(final_dataset, outputs_dirpath=outputs_path, x="distance_from_tip", y="Massic mineral N uptake", c="root_order", s=1, name_suffix=f"_{final_time}")
+
+    def Fig_1_d(scenario_dataset, outputs_dirpath):
+        final_time = max(scenario_dataset.t.values)
+        final_dataset = scenario_dataset.sel(t=final_time)
+
+        total_struct_mass = final_dataset["struct_mass"].sum()
+
+        Nm_export_to_shoot_per_struct_mass = final_dataset["Net mineral N uptake"].sum() / total_struct_mass
+        simple_uptake_per_struct_mass = final_dataset["simple_import_Nm"].sum() / total_struct_mass
+
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.xaxis.set_major_formatter(FuncFormatter(scientific_formatter))
+        ax.yaxis.set_major_formatter(FuncFormatter(scientific_formatter))
+
+        labels = ["Root-CyNAPS", "Simple whole roots system Michaelis-Menten"]
+        ax.bar(range(len(labels)), 
+               [Nm_export_to_shoot_per_struct_mass, simple_uptake_per_struct_mass], color=["green", "purple"], log=True)
+
+        ax.set_ylabel("Simulated inorganic N uptake (mol.g-1.s-1)")
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels)
+        ax.set_ylim([1e-9, 1e-7])
+
+        filename = f"Bar_N_uptake_{final_time}.png"
+
+        fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
+
+        plt.close()
+
+    def Fig_2(final_dataset, outputs_dirpath, distance_bins):
+        
+        total_struct_mass = final_dataset["struct_mass"].sum()
+        # total_length = final_dataset["length"].sum()
+        total_flow = final_dataset["Net mineral N uptake"].sum()
+
+        first_dataset = final_dataset.where(final_dataset.root_order == 1)
+        if np.any((final_dataset.root_order > 1).values):
+            lateral_dataset = final_dataset.where(final_dataset.root_order > 1)
+        else:
+            lateral_dataset = None
+        # binned_dataset = final_dataset.groupby_bins("distance_from_tip", distance_bins).sum()
+        first_binned_dataset = first_dataset.groupby_bins("distance_from_tip", distance_bins).sum()
+        if lateral_dataset:
+            lateral_binned_dataset = lateral_dataset.groupby_bins("distance_from_tip", distance_bins).sum()
+
+        # Plotting
+        fig, ax = plt.subplots(figsize=(8, 5))
+
+        # Create labels for each bin
+        bin_labels = [0]
+        for bin in first_binned_dataset.distance_from_tip_bins.values:
+            bin_labels.append(bin.right)
+        
+        # X locations for the bars
+        x = np.arange(len(bin_labels))
+        width = 0.35  # Width of each bar
+
+        # Plot side-by-side proportion of uptake and struct mass for each root type
+        ax.bar(x[:-1] + 0.5 - width/2, (100 * first_binned_dataset["Net mineral N uptake"] / total_flow).values, width, label='seminal + nodal N uptake', color="green")
+        if lateral_dataset:
+            ax.bar(x[:-1] + 0.5 - width/2, (100 * lateral_binned_dataset["Net mineral N uptake"] / total_flow).values, width, bottom=(100 * first_binned_dataset["Net mineral N uptake"] / total_flow).values ,label='lateral N uptake', color="limegreen")
+
+        ax.bar(x[:-1] + 0.5 + width/2, (100 * first_binned_dataset["struct_mass"] / total_struct_mass).values, width, label='seminal + nodal struct mass uptake', color="chocolate")
+        if lateral_dataset:
+            ax.bar(x[:-1] + 0.5 + width/2, (100 * lateral_binned_dataset["struct_mass"] / total_struct_mass).values, width, bottom=(100 * first_binned_dataset["struct_mass"] / total_struct_mass).values , label='lateral struct mass', color="darkorange")
+
+        # Add labels and title
+        ax.set_xlabel("Distance from tip groups (m)")
+        ax.set_ylabel("% of root system total")
+        ax.set_xticks(x)
+        ax.set_xticklabels(bin_labels, rotation=45)
+        ax.legend(loc="upper right")
+        # ax.grid(True, linestyle='--', alpha=0.6)
+
+        filename = f"Bin_contribution_N_uptake_{final_dataset.t.values}.png"
+
+        fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
+
+        plt.close()
 
 
 class Indicators:
@@ -2412,3 +2507,45 @@ class Indicators:
     
     def cylinder_surface(d):
         return d.length * (2 * np.pi * d.radius)
+
+    def compute(d, formula):
+        variables = set(re.findall(r'\b[a-zA-Z_]\w*\b', formula))
+
+        units = {var: ureg(d[var].unit.replace("-", "^-")) for var in variables}
+
+        result = eval(formula, {}, d)
+
+        result_unit = eval(formula, {}, units)
+
+        result.attrs.update({"unit": f"{result_unit.units:~P}"})
+        
+        return result
+    
+class XarrayPlotting:
+
+    def scatter_xarray(dataset, outputs_dirpath, x: str, y: str, c: str=None, s: int=None, name_suffix: str=""):
+        fig, ax = plt.subplots()
+        ax.xaxis.set_major_formatter(FuncFormatter(scientific_formatter))
+        ax.yaxis.set_major_formatter(FuncFormatter(scientific_formatter))
+
+        x_unit = ureg(dataset[x].unit.replace("-", "^-"))
+        y_unit = ureg(dataset[y].unit.replace("-", "^-"))
+        if c:
+            c_unit = ureg(dataset[c].unit.replace("-", "^-"))
+
+        plotted = ax.scatter(dataset[x].values, dataset[y].values, c=dataset[c], s=s)
+        ax.set_xlabel(f"{x.replace('_', ' ')} ({x_unit.units:~P})")
+        ax.set_ylabel(f"{y.replace('_', ' ')} ({y_unit.units:~P})")
+
+        if c:
+            shown_name = f"{c_unit.units:~P}"
+            if shown_name == "":
+                shown_name = "adim"
+
+            fig.colorbar(plotted, ax=ax, label=f"{c.replace('_', ' ')} ({shown_name})")
+
+        filename = f"Scatter_{y}_vs_{x}_colored_by_{c}{name_suffix}.png"
+
+        fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
+
+        plt.close()
