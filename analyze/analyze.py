@@ -106,6 +106,16 @@ balance_dicts_no_C = {
                 "rhizodeposits": dict(Gross_AA_Exudation={"type": "output", "conversion": 1.})
                  }
 
+color_palette = dict(
+    black="#000000",
+    lightorange="#E69F00",
+    lightblue="#56B4E9",
+    green="#009E73",
+    yellow="#F0E442",
+    blue="#0072B2",
+    orange="#D55E00",
+    pink="#CC79A7")
+
 ureg = UnitRegistry()
 
 
@@ -139,7 +149,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
         #dataset["Cumulative_Nitrogen_Uptake"] = Indicators.Cumulative_Nitrogen_Uptake(d=dataset)
         #dataset["Cumulative_Carbon_Costs"] = Indicators.Cumulative_Carbon_Costs(d=dataset)
         #dataset["Gross_Hexose_Exudation"] = Indicators.Gross_Hexose_Exudation(d=dataset)
-        dataset["Gross_AA_Exudation"] = Indicators.Gross_AA_Exudation(d=dataset)
+        dataset["Net AA Exudation"] = Indicators.compute(d=dataset, formula="diffusion_AA_soil + diffusion_AA_soil_xylem - import_AA")
         #dataset["Gross_C_Rhizodeposition"] = Indicators.Gross_C_Rhizodeposition(d=dataset)
         #dataset["Rhizodeposits_CN_Ratio"] = Indicators.Rhizodeposits_CN_Ratio(d=dataset)
         #dataset["CN_Ratio_Cumulated_Rhizodeposition"] = Indicators.CN_Ratio_Cumulated_Rhizodeposition(d=dataset)
@@ -161,11 +171,16 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
 
         # First individual analyses
         oldest_scenario = scenarios[-1]
-        oldest_dataset = filter_dataset(dataset, scenario=oldest_scenario)
-        step = 0.03
+        oldest_dataset = dataset
+        # oldest_dataset = filter_dataset(dataset, scenario=oldest_scenario)
+        step = 0.005
         distance_bins = np.arange(oldest_dataset["distance_from_tip"].min(), 
                                   oldest_dataset["distance_from_tip"].max() + step, step)
         scenario_times = dict(zip(scenarios, dataset.t.values))
+        grouping_distances = []
+        normalized_input_flux = []
+        sucrose_input_df = pd.read_csv("inputs/sucrose_input_Swinnen_et_al_1994_20degrees_interpolated.csv", sep=';')
+
         for scenario in scenarios:
             print(f"[INFO] Processing scenario {scenario}")
             raw_dirpath = os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_raw/")
@@ -184,9 +199,34 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
             #     RootCyNAPSFigures.Fig_2(scenario_dataset, raw_dirpath)
             # except:
             #     print(f"Figure creation failed for scenario {scenario}")
+            RootCyNAPSFigures.Fig_1_c(scenario_dataset, raw_dirpath)
 
-            final_dataset = scenario_dataset.sel(t=scenario_times[scenario])[["distance_from_tip", "root_order", "struct_mass", "Net mineral N uptake"]]
-            RootCyNAPSFigures.Fig_2(final_dataset, raw_dirpath, distance_bins)
+            print(np.unique(scenario_dataset["type"].values))
+            unique, counts = np.unique(scenario_dataset["label"].values, return_counts=True)
+            print(dict(zip(unique, counts))["Apex"])
+
+            unique, counts = np.unique(scenario_dataset["axis_index"].values, return_counts=True)
+            # print(dict(zip(unique, counts)))
+
+            seminal_id = [axis_id for axis_id in unique if axis_id.startswith("seminal")]
+            nodal_id = [axis_id for axis_id in unique if axis_id.startswith("adventitious")]
+            laterals_id = [axis_id for axis_id in unique if axis_id.startswith("lateral")]
+            print(seminal_id)
+            
+            final_dataset = scenario_dataset.sel(t=scenario_times[scenario])[["distance_from_tip", "root_order", "axis_index", "struct_mass", "length", "Net mineral N uptake", "Net AA Exudation"]]
+            
+            seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
+            nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
+            lateral_dataset = final_dataset.where(final_dataset["axis_index"].isin(laterals_id), drop=True)
+
+            print(seminal_dataset, nodal_dataset, lateral_dataset)
+
+            
+            grouping_distance, total_struct_mass = RootCyNAPSFigures.Fig_2(final_dataset, raw_dirpath, distance_bins, flow="Net mineral N uptake", normalization_property="length")
+            RootCyNAPSFigures.Fig_2_lines(final_dataset, raw_dirpath, distance_bins, flow="Net mineral N uptake", normalization_property="length")
+            grouping_distances.append(grouping_distance)
+            sucrose_input_rate = sucrose_input_df.loc[sucrose_input_df["t"] == scenario_times[scenario], "sucrose_input_rate"].item()
+            normalized_input_flux.append(sucrose_input_rate/total_struct_mass)
 
             # print(scenario_dataset.where(scenario_dataset.distance_from_tip < 0.01, drop=True).where(scenario_dataset.z1 < -0.10, drop=True))
             # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=True, target_vid=122)
@@ -225,6 +265,19 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
             #                recording_off_screen=False, background_color="brown", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=False, root_hairs=True)
             #post_color_mtg(os.path.join(mtg_dirpath, "root_1527.pckl"), mtg_dirpath, property="import_Nm", flow_property=True, 
             #                recording_off_screen=False, background_color="white", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=True)
+
+        fig, ax = plt.subplots()
+        # plotted = ax.scatter(grouping_distances, normalized_input_flux, c=np.array(list(scenario_times.values())) / 24)
+        plotted = ax.scatter(np.array(list(scenario_times.values())) / 24, grouping_distances)
+        
+        fig.colorbar(plotted, ax=ax, label=f"Plant age (days)")
+        xunit = "m"
+        ax.set_xlabel(rf"$Distance from apex to group 50% of root system N uptake\ \mathrm{{({xunit})}}$")
+        ax.set_xlabel(f"Distance from apex to group 50% of root system N uptake({xunit})")
+        yunit = "mol.g-1.s-1"
+        # ax.set_ylabel(rf"$Normalized sucrose input rate\ \mathrm{{({yunit})}}$")
+        ax.set_ylabel(f"Normalized sucrose input rate ({yunit})")
+        fig.savefig(os.path.join(outputs_dirpath, "C_input_dependancy.png"))
 
 
         # Then scenario comparisions
@@ -773,6 +826,8 @@ def cnwheat_plot_csv(csv_dirpath):
 
     cnwheat_tools.plot_cnwheat_ouputs(pd.DataFrame(LAI_dict), 't', 'LAI', x_label='Time (Hour)', y_label='LAI',
                                       plot_filepath=os.path.join(plot_path, 'LAI.PNG'), explicit_label=False)
+
+    
 
 
 # Define function for string formatting of scientific notation
@@ -2346,6 +2401,30 @@ def recolorize_glb(time_step, dataset, property, glb_dirpath, colormap):
     scene.export(f"{property}.glb")
 
 
+def inspect_mtg_structure(g):
+    print(g.components_at_scale(1, 1))
+    axis_scale = [g.get_vertex_property(vid) for vid in g.components_at_scale(1, 2)]
+    axis_vids = [vid for vid in g.components_at_scale(1, 2)]
+    print(dict(zip(axis_vids, [e["label"] for e in axis_scale])))
+    chosenid = int(input("which axis?"))
+    print(g.get_vertex_property(chosenid))
+    metamer_scale = [g.get_vertex_property(vid) for vid in g.components_at_scale(chosenid, 3)]
+    metamer_vids = [vid for vid in g.components_at_scale(chosenid, 3)]
+    print(dict(zip(metamer_vids, [e["label"] for e in metamer_scale])))
+    chosenid = int(input("which metamer?"))
+    print(g.get_vertex_property(chosenid))
+    organ_scale = [g.get_vertex_property(vid) for vid in g.components_at_scale(chosenid, 4)]
+    organ_vids = [vid for vid in g.components_at_scale(chosenid, 4)]
+    print(dict(zip(organ_vids, [e["label"] for e in organ_scale])))
+    chosenid = int(input("which organ?"))
+    print(g.get_vertex_property(chosenid))
+    elt_scale = [g.get_vertex_property(vid) for vid in g.components_at_scale(chosenid, 5)]
+    elt_vids = [vid for vid in g.components_at_scale(chosenid, 5)]
+    print(dict(zip(elt_vids, [e["label"] for e in elt_scale])))
+    chosenid = int(input("which element?"))
+    print(g.get_vertex_property(chosenid))
+    input()
+
 
 class RootCyNAPSFigures:
 
@@ -2353,8 +2432,8 @@ class RootCyNAPSFigures:
         final_time = max(scenario_dataset.t.values)
         final_dataset = scenario_dataset.sel(t=final_time)
 
-        XarrayPlotting.scatter_xarray(final_dataset, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lengthy Net mineral N uptake", c="root_order", s=1, name_suffix=f"_{final_time}")
-        XarrayPlotting.scatter_xarray(final_dataset, outputs_dirpath=outputs_path, x="distance_from_tip", y="Massic mineral N uptake", c="root_order", s=1, name_suffix=f"_{final_time}")
+        XarrayPlotting.scatter_xarray(final_dataset, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lengthy Net mineral N uptake", c="root_order", discrete=True, s=1, name_suffix=f"_{final_time}")
+        XarrayPlotting.scatter_xarray(final_dataset, outputs_dirpath=outputs_path, x="distance_from_tip", y="Massic mineral N uptake", c="root_order", discrete=True, s=1, name_suffix=f"_{final_time}")
 
     def Fig_1_d(scenario_dataset, outputs_dirpath):
         final_time = max(scenario_dataset.t.values)
@@ -2382,13 +2461,12 @@ class RootCyNAPSFigures:
 
         fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
 
-        plt.close()
+        return fig, ax
 
-    def Fig_2(final_dataset, outputs_dirpath, distance_bins):
+    def Fig_2(final_dataset, outputs_dirpath, distance_bins, flow, normalization_property):
         
-        total_struct_mass = final_dataset["struct_mass"].sum()
-        # total_length = final_dataset["length"].sum()
-        total_flow = final_dataset["Net mineral N uptake"].sum()
+        total_normalization_property = final_dataset[normalization_property].sum()
+        total_flow = final_dataset[flow].sum()
 
         first_dataset = final_dataset.where(final_dataset.root_order == 1)
         if np.any((final_dataset.root_order > 1).values):
@@ -2413,13 +2491,13 @@ class RootCyNAPSFigures:
         width = 0.35  # Width of each bar
 
         # Plot side-by-side proportion of uptake and struct mass for each root type
-        ax.bar(x[:-1] + 0.5 - width/2, (100 * first_binned_dataset["Net mineral N uptake"] / total_flow).values, width, label='seminal + nodal N uptake', color="green")
+        ax.bar(x[:-1] + 0.5 - width/2, (100 * first_binned_dataset[flow] / total_flow).values, width, label=f'seminal + nodal {flow.replace("_", " ")}', color="green")
         if lateral_dataset:
-            ax.bar(x[:-1] + 0.5 - width/2, (100 * lateral_binned_dataset["Net mineral N uptake"] / total_flow).values, width, bottom=(100 * first_binned_dataset["Net mineral N uptake"] / total_flow).values ,label='lateral N uptake', color="limegreen")
+            ax.bar(x[:-1] + 0.5 - width/2, (100 * lateral_binned_dataset[flow] / total_flow).values, width, bottom=(100 * first_binned_dataset[flow] / total_flow).values ,label=f'lateral {flow.replace("_", " ")}', color="limegreen")
 
-        ax.bar(x[:-1] + 0.5 + width/2, (100 * first_binned_dataset["struct_mass"] / total_struct_mass).values, width, label='seminal + nodal struct mass uptake', color="chocolate")
+        ax.bar(x[:-1] + 0.5 + width/2, (100 * first_binned_dataset[normalization_property] / total_normalization_property).values, width, label='seminal + nodal {normalization_property.replace("_", " ")}', color="chocolate")
         if lateral_dataset:
-            ax.bar(x[:-1] + 0.5 + width/2, (100 * lateral_binned_dataset["struct_mass"] / total_struct_mass).values, width, bottom=(100 * first_binned_dataset["struct_mass"] / total_struct_mass).values , label='lateral struct mass', color="darkorange")
+            ax.bar(x[:-1] + 0.5 + width/2, (100 * lateral_binned_dataset[normalization_property] / total_normalization_property).values, width, bottom=(100 * first_binned_dataset[normalization_property] / total_normalization_property).values , label=f'lateral {normalization_property.replace("_", " ")}', color="darkorange")
 
         # Add labels and title
         ax.set_xlabel("Distance from tip groups (m)")
@@ -2427,13 +2505,116 @@ class RootCyNAPSFigures:
         ax.set_xticks(x)
         ax.set_xticklabels(bin_labels, rotation=45)
         ax.legend(loc="upper right")
+        ax.set_xlim([-0.5, 30])
+        ax.set_ylim([0, 30])
         # ax.grid(True, linestyle='--', alpha=0.6)
 
-        filename = f"Bin_contribution_N_uptake_{final_dataset.t.values}.png"
+        ymin, ymax = ax.get_ylim()
+
+        distance_at_threshold, norm_prop_at_threshold = RootCyNAPSFigures.Fig_2_polarisation(final_dataset, flow="Net mineral N uptake", normalization_property=normalization_property)
+
+        line_x = 30 * distance_at_threshold / 0.2
+        ax.plot([line_x, line_x], [ymin, ymax], color="black", linestyle='dashed')
+
+        ax.text(line_x + 1, 0.9 * ymax, f"50% of flux\n={norm_prop_at_threshold:.2%} of {normalization_property.replace('_', ' ')}")
+
+        filename = f"Bin_contribution_{flow.replace('_', ' ')}_{final_dataset.t.values}.png"
 
         fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
 
         plt.close()
+
+        return distance_at_threshold, float(total_normalization_property.values)
+
+        
+
+    def Fig_2_polarisation(final_dataset, flow, normalization_property):
+
+        total_normalization_property = final_dataset[normalization_property].sum(dim="vid")
+        total_flow = abs(final_dataset[flow]).sum(dim="vid")
+        sorted_dataset = final_dataset.sortby("distance_from_tip")
+
+        # Compute the cumulative sum over the sorted 'length' variable along the 'vid' dimension
+        cumulative_normalization_property_proportion = (sorted_dataset[normalization_property].cumsum(dim="vid") / total_normalization_property)
+        cumulative_flow_proportion = (sorted_dataset[flow].cumsum(dim="vid") / total_flow)
+
+        # Find threshold index where cumulative import exceeds 50%
+        threshold_idx = (cumulative_flow_proportion >= 0.5).argmax().item()
+
+        # Get distance and struct mass proportion at that index
+        distance_at_threshold = sorted_dataset["distance_from_tip"][threshold_idx]
+        normalization_property_at_threshold = cumulative_normalization_property_proportion[threshold_idx]
+
+        return float(distance_at_threshold.values), float(normalization_property_at_threshold.values)
+    
+    
+    def Fig_2_lines(final_dataset, outputs_dirpath, distance_bins, flow, normalization_property):
+        
+        total_normalization_property = final_dataset[normalization_property].sum()
+        total_flow = final_dataset[flow].sum()
+
+        first_dataset = final_dataset.where(final_dataset.root_order == 1)
+        if np.any((final_dataset.root_order > 1).values):
+            lateral_dataset = final_dataset.where(final_dataset.root_order > 1)
+        else:
+            lateral_dataset = None
+
+        binned_dataset = final_dataset.groupby_bins("distance_from_tip", distance_bins).sum()
+        first_binned_dataset = first_dataset.groupby_bins("distance_from_tip", distance_bins).sum()
+        if lateral_dataset:
+            lateral_binned_dataset = lateral_dataset.groupby_bins("distance_from_tip", distance_bins).sum()
+
+        # Plotting
+        fig, ax = plt.subplots(figsize=(8, 5))
+
+        # Create labels for each bin
+        bin_labels = [0]
+        for bin in first_binned_dataset.distance_from_tip_bins.values:
+            bin_labels.append(bin.right)
+        
+        # X locations for the bars
+        x = np.arange(len(bin_labels))
+        width = 0.35  # Width of each bar
+
+        # Plot side-by-side proportion of uptake and struct mass for each root type
+        
+        if lateral_dataset:
+            ax.plot(x[:-1] + 0.5 - width/2, (100 * first_binned_dataset[flow] / total_flow).values, width, label=f'seminal + nodal {flow.replace("_", " ")}', color="green")
+            ax.plot(x[:-1] + 0.5 - width/2, (100 * lateral_binned_dataset[flow] / total_flow).values, width, label=f'lateral {flow.replace("_", " ")}', color="limegreen")
+        ax.plot(x[:-1] + 0.5 - width/2, (100 * binned_dataset[flow] / total_flow).values, width, label=f'total bin {flow.replace("_", " ")}', color="darkgreen")
+        
+        if lateral_dataset:
+            ax.plot(x[:-1] + 0.5 + width/2, (100 * first_binned_dataset[normalization_property] / total_normalization_property).values, width, label=f'seminal + nodal {normalization_property.replace("_", " ")}', color="chocolate")
+            ax.plot(x[:-1] + 0.5 + width/2, (100 * lateral_binned_dataset[normalization_property] / total_normalization_property).values, width, label=f'lateral {normalization_property.replace("_", " ")}', color="darkorange")
+        ax.plot(x[:-1] + 0.5 + width/2, (100 * binned_dataset[normalization_property] / total_normalization_property).values, width, label=f'total bin {normalization_property.replace("_", " ")}', color="black")
+
+
+        # Add labels and title
+        ax.set_xlabel("Distance from tip groups (m)")
+        ax.set_ylabel("% of root system total")
+        ax.set_xticks(x)
+        ax.set_xticklabels(bin_labels, rotation=45)
+        ax.legend(loc="upper right")
+        ax.set_xlim([-0.5, 30])
+        ax.set_ylim([0, 30])
+        # ax.grid(True, linestyle='--', alpha=0.6)
+
+        ymin, ymax = ax.get_ylim()
+
+        distance_at_threshold, norm_prop_at_threshold = RootCyNAPSFigures.Fig_2_polarisation(final_dataset, flow="Net mineral N uptake", normalization_property=normalization_property)
+
+        line_x = 30 * distance_at_threshold / 0.2
+        ax.plot([line_x, line_x], [ymin, ymax], color="black", linestyle='dashed')
+
+        ax.text(line_x + 1, 0.9 * ymax, f"50% of flux\n={norm_prop_at_threshold:.2%} of {normalization_property.replace('_', ' ')}")
+
+        filename = f"Bin_contribution_{flow.replace('_', ' ')}_{final_dataset.t.values}.png"
+
+        fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
+
+        plt.close()
+
+        return distance_at_threshold, float(total_normalization_property.values)
 
 
 class Indicators:
@@ -2523,7 +2704,7 @@ class Indicators:
     
 class XarrayPlotting:
 
-    def scatter_xarray(dataset, outputs_dirpath, x: str, y: str, c: str=None, s: int=None, name_suffix: str=""):
+    def scatter_xarray(dataset, outputs_dirpath, x: str, y: str, c: str=None, discrete: bool=False, s: int=None, name_suffix: str=""):
         fig, ax = plt.subplots()
         ax.xaxis.set_major_formatter(FuncFormatter(scientific_formatter))
         ax.yaxis.set_major_formatter(FuncFormatter(scientific_formatter))
@@ -2533,7 +2714,16 @@ class XarrayPlotting:
         if c:
             c_unit = ureg(dataset[c].unit.replace("-", "^-"))
 
-        plotted = ax.scatter(dataset[x].values, dataset[y].values, c=dataset[c], s=s)
+        if not isinstance(dataset, list):
+            dataset = [dataset]
+
+        unique_values = np.unique(d[c].values)
+        for i, d in enumerate(dataset):
+            if discrete:
+                plotted = ax.scatter(d[x].values, d[y].values, c=list(color_palette.values())[i], s=s, label=unique_values[i])
+            else:
+                plotted = ax.scatter(d[x].values, d[y].values, c=d[c].values, s=s)
+        
         ax.set_xlabel(f"{x.replace('_', ' ')} ({x_unit.units:~P})")
         ax.set_ylabel(f"{y.replace('_', ' ')} ({y_unit.units:~P})")
 
@@ -2542,7 +2732,10 @@ class XarrayPlotting:
             if shown_name == "":
                 shown_name = "adim"
 
-            fig.colorbar(plotted, ax=ax, label=f"{c.replace('_', ' ')} ({shown_name})")
+            if discrete:
+                ax.legend()
+            else:
+                fig.colorbar(plotted, ax=ax, label=f"{c.replace('_', ' ')} ({shown_name})")
 
         filename = f"Scatter_{y}_vs_{x}_colored_by_{c}{name_suffix}.png"
 
