@@ -1,7 +1,9 @@
 import os
+import time
 import pickle
 import shutil
 import imageio
+import multiprocessing as mp
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 # from pygifsicle import optimize
@@ -31,7 +33,7 @@ import pyvista as pv
 from random import random
 import warnings
 
-from log.visualize import plot_mtg, plot_xr, custom_colorbar
+from log.visualize import plot_mtg, plot_xr, custom_colorbar, unit_from_str, expand_compact_units, latex_unit_compact
 import openalea.plantgl.all as pgl
 
 from analyze.workflow.cnwheat_comparisions import compare_shoot_outputs
@@ -143,6 +145,12 @@ twenty_palette = dict(
     lightcyan="#9EDAE5",
 )
 
+aliases = dict(
+    Nm="mineral N concentration",
+    AA="total amino acid concentration",
+
+)
+
 ureg = UnitRegistry()
 
 
@@ -175,7 +183,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
         #dataset["Cumulative_NAE"] = Indicators.Cumulative_Nitrogen_Aquisition_Efficiency(d=dataset)
         #dataset["Cumulative_Nitrogen_Uptake"] = Indicators.Cumulative_Nitrogen_Uptake(d=dataset)
         #dataset["Cumulative_Carbon_Costs"] = Indicators.Cumulative_Carbon_Costs(d=dataset)
-        #dataset["Gross_Hexose_Exudation"] = Indicators.Gross_Hexose_Exudation(d=dataset)
+        dataset["Gross_Hexose_Exudation"] = Indicators.Gross_Hexose_Exudation(d=dataset)
         dataset["Net_AA_Exudation"] = Indicators.compute(d=dataset, formula="diffusion_AA_soil + diffusion_AA_soil_xylem - import_AA")
         #dataset["Gross_C_Rhizodeposition"] = Indicators.Gross_C_Rhizodeposition(d=dataset)
         #dataset["Rhizodeposits_CN_Ratio"] = Indicators.Rhizodeposits_CN_Ratio(d=dataset)
@@ -188,7 +196,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
         dataset["Root_Hairs_Proportion"] = Indicators.Root_Hairs_Proportion(d=dataset)
         dataset["Labile_Nitrogen"] = Indicators.Labile_Nitrogen(d=dataset)
         dataset["cylinder_surface"] = Indicators.cylinder_surface(d=dataset)
-        dataset["Net mineral N uptake"] = Indicators.compute(d=dataset, formula="import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - diffusion_Nm_soil_xylem")
+        dataset["Net_mineral_N_uptake"] = Indicators.compute(d=dataset, formula="import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - diffusion_Nm_soil_xylem")
         dataset["Lengthy mineral N uptake"] = Indicators.compute(d=dataset, formula="(import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - diffusion_Nm_soil_xylem) / length")
         dataset["Massic_mineral_N_uptake"] = Indicators.compute(d=dataset, formula="(import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - diffusion_Nm_soil_xylem) / struct_mass")
 
@@ -211,128 +219,144 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
         normalized_input_flux = []
         sucrose_input_df = pd.read_csv("inputs/sucrose_input_Swinnen_et_al_1994_20degrees_interpolated.csv", sep=';')
 
-        for scenario in scenarios:
-            print(f"[INFO] Processing scenario {scenario}")
-            raw_dirpath = os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_raw/")
-            mtg_dirpath = os.path.join(outputs_dirpath, scenario, "MTG_files/")
+        first_loop = False
 
-            if len(scenarios) > 1:
-                scenario_dataset = filter_dataset(dataset, scenario=scenario)
-            else:
-                scenario_dataset = dataset
+        if first_loop:
 
-            # recolorize_glb(100, scenario_dataset, property="Nm", glb_dirpath="", 
-            #                colormap="jet")
-            
-            ### Fig 1 d related
-            running = True
+            for scenario in scenarios:
+                print(f"[INFO] Processing scenario {scenario}")
+                raw_dirpath = os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_raw/")
+                mtg_dirpath = os.path.join(outputs_dirpath, scenario, "MTG_files/")
 
-            if running:
+                if len(scenarios) > 1:
+                    scenario_dataset = filter_dataset(dataset, scenario=scenario)
+                else:
+                    scenario_dataset = dataset
 
-                final_dataset = scenario_dataset.sel(t=scenario_times[scenario])
-                simple_uptake_per_struct_mass = final_dataset["simple_import_Nm"].sum() / final_dataset["struct_mass"].sum()
+                # recolorize_glb(100, scenario_dataset, property="Nm", glb_dirpath="", 
+                #                colormap="jet")
 
-                comparision_instructions = {
-                    "Massic_mineral_N_uptake" : dict(paper="Devienne et al. 1994", reported_min=1.67e-9, reported_max=2.28e-8, other_models=dict(name="Uniform Michaelis-Menten", value=simple_uptake_per_struct_mass)),
-                    "Net_AA_Exudation": dict(paper="Cao et al., 2021", reported_min=8.3e-13, reported_max=2.1e-9, normalize_by='struct_mass'),
-                    "Nm": dict(paper="Siddiqi et al. 1989", reported_min=1e-5, reported_max=5e-3),
-                    "AA": dict(paper="Azevedo Neto et al. 2009", reported_min=6.395e-4, reported_max=1.186e-3),
-                    "radial_import_water": dict(paper="Fischer et al. 1966", reported_min=1e-5, reported_max=7e-4, normalize_by='struct_mass'),
-                    #"Nm_root_shoot_xylem": dict(paper="Fischer et al. 1966", reported_min=1e-5, reported_max=4.7e-4, normalize_by='struct_mass'),
-                }
-                RootCyNAPSFigures.Fig_1_d(final_dataset, comparision_instructions, raw_dirpath, suffix_name=f"_{scenario_times[scenario]}")
-             
-            unique, counts = np.unique(scenario_dataset["label"].values, return_counts=True)
-            apex_number = dict(zip(unique, counts))["Apex"]
-
-            unique, counts = np.unique(scenario_dataset["axis_index"].values, return_counts=True)
-
-            seminal_id = [axis_id for axis_id in unique if axis_id.startswith("seminal")]
-            nodal_id = [axis_id for axis_id in unique if axis_id.startswith("adventitious")]
-            laterals_id = [axis_id for axis_id in unique if axis_id.startswith("lateral")]
-            
-            ### Fig 1 c related
-            running = False
-
-            if running:
-
-                color="C_hexose_root"
+                # meije_question(scenario_dataset)
                 
-                final_dataset = scenario_dataset.sel(t=scenario_times[scenario])[[color, "distance_from_tip", "root_order", "axis_index", "struct_mass", "length", "Net mineral N uptake", "Lengthy mineral N uptake", "Massic_mineral_N_uptake", "Net AA Exudation", "C_hexose_root"]]
+                ### Fig 1 d related
+                running = False
+
+                if running:
+
+                    final_dataset = scenario_dataset.sel(t=scenario_times[scenario])
+                    simple_uptake_per_struct_mass = final_dataset["simple_import_Nm"].sum() / final_dataset["struct_mass"].sum()
+
+                    comparision_instructions = {
+                        "Massic_mineral_N_uptake" : dict(paper="Devienne et al. 1994", reported_min=1.67e-9, reported_max=2.28e-8, other_models=dict(name="Uniform Michaelis-Menten", value=simple_uptake_per_struct_mass)),
+                        "Net_AA_Exudation": dict(paper="Cao et al., 2021", reported_min=8.3e-13, reported_max=2.1e-9, normalize_by='struct_mass'),
+                        "Nm": dict(paper="Siddiqi et al. 1989", reported_min=1e-5, reported_max=5e-3),
+                        "AA": dict(paper="Azevedo Neto et al. 2009", reported_min=6.395e-4, reported_max=1.186e-3),
+                        "radial_import_water": dict(paper="Fischer et al. 1966", reported_min=1e-5, reported_max=7e-4, normalize_by='struct_mass'),
+                        #"Nm_root_shoot_xylem": dict(paper="Fischer et al. 1966", reported_min=1e-5, reported_max=4.7e-4, normalize_by='struct_mass'),
+                    }
+                    RootCyNAPSFigures.Fig_1_d(final_dataset, comparision_instructions, raw_dirpath, suffix_name=f"_{scenario_times[scenario]}")
                 
-                seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
-                nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
-                lateral_dataset = final_dataset.where(final_dataset["axis_index"].isin(laterals_id), drop=True)
-
-                per_root_type_ds = dict(seminal=seminal_dataset, nodal=nodal_dataset, lateral=lateral_dataset)
-                first_order_ds = dict(seminal=seminal_dataset, nodal=nodal_dataset)
                 
-                RootCyNAPSFigures.Fig_1_c(per_root_type_ds, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}", discrete=True, xlog=False)
-                RootCyNAPSFigures.Fig_1_c(per_root_type_ds, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_log", discrete=True, xlog=True)
-                RootCyNAPSFigures.Fig_1_c(first_order_ds, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_order1_log", discrete=True, xlog=True)
+                ### Fig 1 c related
+                running = False
 
-                RootCyNAPSFigures.Fig_1_c(lateral_dataset, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_laterals", xlog=True, c=color)
-                RootCyNAPSFigures.Fig_1_c(seminal_dataset, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_seminals", xlog=True, c=color)
-                RootCyNAPSFigures.Fig_1_c(nodal_dataset, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_nodals", xlog=True, c=color)
+                if running:
 
-            
-            # grouping_distance, total_struct_mass = RootCyNAPSFigures.Fig_2(final_dataset, raw_dirpath, distance_bins, flow="Net mineral N uptake", normalization_property="length")
-            # RootCyNAPSFigures.Fig_2_lines(final_dataset, raw_dirpath, distance_bins, flow="Net mineral N uptake", normalization_property="length")
-            # grouping_distances.append(grouping_distance)
-            # sucrose_input_rate = sucrose_input_df.loc[sucrose_input_df["t"] == scenario_times[scenario], "sucrose_input_rate"].item()
-            # normalized_input_flux.append(sucrose_input_rate/total_struct_mass)
+                    all_axes = [axis_id for axis_id in scenario_dataset["axis_index"].values.flatten() if isinstance(axis_id, str)]
+                    unique = np.unique(all_axes)
 
-            # print(scenario_dataset.where(scenario_dataset.distance_from_tip < 0.01, drop=True).where(scenario_dataset.z1 < -0.10, drop=True))
-            # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=True, target_vid=122)
-            # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=True, target_vid=100)
-            #surface_repartition(dataset, output_dirpath=outputs_dirpath, fps=fps)
+                    seminal_id = [axis_id for axis_id in unique if axis_id.startswith("seminal")]
+                    nodal_id = [axis_id for axis_id in unique if axis_id.startswith("adventitious")]
+                    laterals_id = [axis_id for axis_id in unique if axis_id.startswith("lateral")]
 
-            # apex_zone_contribution(scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=0.05,
-                                # flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="root_exchange_surface")
-            # apex_zone_contribution(scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=0.02,
-            #                        flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="C_hexose_root")
-            # apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
-            #                        flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="C_hexose_root")
-            # trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="distance_from_tip", y="NAE",
-            #                  color=None, fps=fps)
-            
-            #z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow=zcontrib_flow)
-            # z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow="Gross_Hexose_Exudation")
-            #z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow="Gross_AA_Exudation")
-            
-            # Snapshots over specific days
-            # ignore, snapshot_length, snapshot_number = 72, 1100, 1
-            # props = ["root_exchange_surface", "NAE", "Rhizodeposits_CN_Ratio"]
-            # props = ["root_exchange_surface"]
-            # mean_and_std = [False, True, True]
-            # x_max = [0.03, 2, 200]
+                    color="C_hexose_root"
+                    
+                    final_dataset = scenario_dataset.sel(t=scenario_times[scenario])[[color, "distance_from_tip", "root_order", "axis_index", "struct_mass", "length", "Net_mineral_N_uptake", "Lengthy mineral N uptake", "Massic_mineral_N_uptake", "Net_AA_Exudation", "C_hexose_root"]]
+                    
+                    seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
+                    nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
+                    lateral_dataset = final_dataset.where(final_dataset["axis_index"].isin(laterals_id), drop=True)
 
-            # distance = int((max(scenario_dataset.t.values) - ignore - snapshot_length) / snapshot_number)
-            # for snp in range(1, snapshot_number+1):
-            #     tstart, tstop = ignore + snp*distance, ignore + snp*distance + snapshot_length
-            #     for i, prop in enumerate(props):
-            #         pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="hexose", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
-            #         pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="AA", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
-            #         pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="Nm", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
+                    per_root_type_ds = dict(seminal=seminal_dataset, nodal=nodal_dataset, lateral=lateral_dataset)
+                    first_order_ds = dict(seminal=seminal_dataset, nodal=nodal_dataset)
+                    
+                    RootCyNAPSFigures.Fig_1_c(per_root_type_ds, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}", discrete=True, xlog=False)
+                    RootCyNAPSFigures.Fig_1_c(per_root_type_ds, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_log", discrete=True, xlog=True)
+                    RootCyNAPSFigures.Fig_1_c(first_order_ds, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_order1_log", discrete=True, xlog=True)
 
-            # post_color_mtg(os.path.join(mtg_dirpath, "root_1570.pckl"), mtg_dirpath, property="import_Nm", flow_property=True, 
-            #                recording_off_screen=False, background_color="brown", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=False, root_hairs=True)
-            #post_color_mtg(os.path.join(mtg_dirpath, "root_1527.pckl"), mtg_dirpath, property="import_Nm", flow_property=True, 
-            #                recording_off_screen=False, background_color="white", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=True)
+                    RootCyNAPSFigures.Fig_1_c(lateral_dataset, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_laterals", xlog=True, c=color)
+                    RootCyNAPSFigures.Fig_1_c(seminal_dataset, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_seminals", xlog=True, c=color)
+                    RootCyNAPSFigures.Fig_1_c(nodal_dataset, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_nodals", xlog=True, c=color)
 
-        # fig, ax = plt.subplots()
-        # # plotted = ax.scatter(grouping_distances, normalized_input_flux, c=np.array(list(scenario_times.values())) / 24)
-        # plotted = ax.scatter(np.array(list(scenario_times.values())) / 24, grouping_distances)
+                # Fig 2 related
+                running = False
+
+                if running:
+                    all_axes = [axis_id for axis_id in scenario_dataset["axis_index"].values.flatten() if isinstance(axis_id, str)]
+                    unique = np.unique(all_axes)
+
+                    seminal_id = [axis_id for axis_id in unique if axis_id.startswith("seminal")]
+                    nodal_id = [axis_id for axis_id in unique if axis_id.startswith("adventitious")]
+                    laterals_id = [axis_id for axis_id in unique if axis_id.startswith("lateral")]
+                    
+                    final_dataset = filter_dataset(scenario_dataset, time=scenario_times[scenario])[["distance_from_tip", "root_order", "axis_index", "label", "living_struct_mass", "length", "Lengthy mineral N uptake", "Massic_mineral_N_uptake", "hexose_consumption_by_growth", "C_hexose_root", "Net_mineral_N_uptake"]]
+
+                    seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
+                    nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
+                    lateral_dataset = final_dataset.where(final_dataset["axis_index"].isin(laterals_id), drop=True)
+
+                    plotted_datasets = dict(seminals=seminal_dataset, nodals=nodal_dataset, laterals=lateral_dataset)
+
+                    RootCyNAPSFigures.Fig_2_one_prop(final_dataset, plotted_datasets, raw_dirpath, distance_bins, flow="Net_mineral_N_uptake", normalization_property="length", shown_xrange=0.15)
+                # print(scenario_dataset.where(scenario_dataset.distance_from_tip < 0.01, drop=True).where(scenario_dataset.z1 < -0.10, drop=True))
+                # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=True, target_vid=122)
+                # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=True, target_vid=100)
+                #surface_repartition(dataset, output_dirpath=outputs_dirpath, fps=fps)
+
+                # apex_zone_contribution(scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=0.05,
+                                    # flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="root_exchange_surface")
+                # apex_zone_contribution(scenario_dataset, output_dirpath=raw_dirpath, apex_zone_length=0.02,
+                #                        flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="C_hexose_root")
+                # apex_zone_contribution(dataset, output_dirpath=outputs_dirpath, apex_zone_length=0.02,
+                #                        flow="import_Nm", summed_input="diffusion_AA_phloem", color_prop="C_hexose_root")
+                # trajectories_plot(dataset, output_dirpath=outputs_dirpath, x="distance_from_tip", y="NAE",
+                #                  color=None, fps=fps)
+                
+                #z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow=zcontrib_flow)
+                # z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow="Gross_Hexose_Exudation")
+                #z_zone_contribution(fig_zcontrib, ax_zcontrib, dataset=scenario_dataset, scenario=scenario, zmin=0.08, zmax=0.12, flow="Gross_AA_Exudation")
+                
+                # Snapshots over specific days
+                # ignore, snapshot_length, snapshot_number = 72, 1100, 1
+                # props = ["root_exchange_surface", "NAE", "Rhizodeposits_CN_Ratio"]
+                # props = ["root_exchange_surface"]
+                # mean_and_std = [False, True, True]
+                # x_max = [0.03, 2, 200]
+
+                # distance = int((max(scenario_dataset.t.values) - ignore - snapshot_length) / snapshot_number)
+                # for snp in range(1, snapshot_number+1):
+                #     tstart, tstop = ignore + snp*distance, ignore + snp*distance + snapshot_length
+                #     for i, prop in enumerate(props):
+                #         pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="hexose", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
+                #         pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="AA", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
+                #         pipeline_z_bins_animations(dataset=scenario_dataset, prop=prop, metabolite="Nm", output_path=raw_dirpath, fps=fps, t_start=tstart, t_stop=tstop, mean_and_std=mean_and_std[i], x_max=x_max[i])
+
+                # post_color_mtg(os.path.join(mtg_dirpath, "root_1570.pckl"), mtg_dirpath, property="import_Nm", flow_property=True, 
+                #                recording_off_screen=False, background_color="brown", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=False, root_hairs=True)
+                #post_color_mtg(os.path.join(mtg_dirpath, "root_1527.pckl"), mtg_dirpath, property="import_Nm", flow_property=True, 
+                #                recording_off_screen=False, background_color="white", imposed_min=1e-10, imposed_max=1.5e-9, log_scale=True, spinning=True)
+
+        ### Fig 2 & 3 related
+        # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_mineral_N_uptake", name_suffix="_C_per_apex")
         
-        # fig.colorbar(plotted, ax=ax, label=f"Plant age (days)")
-        # xunit = "m"
-        # ax.set_xlabel(rf"$Distance from apex to group 50% of root system N uptake\ \mathrm{{({xunit})}}$")
-        # ax.set_xlabel(f"Distance from apex to group 50% of root system N uptake({xunit})")
-        # yunit = "mol.g-1.s-1"
-        # # ax.set_ylabel(rf"$Normalized sucrose input rate\ \mathrm{{({yunit})}}$")
-        # ax.set_ylabel(f"Normalized sucrose input rate ({yunit})")
-        # fig.savefig(os.path.join(outputs_dirpath, "C_input_dependancy.png"))
-
+        subdataset = dataset[["distance_from_tip", "root_order", "axis_index", "label", "struct_mass", "length", "hexose_consumption_by_growth", "Net_mineral_N_uptake"]]
+        del dataset
+        import gc
+        gc.collect()
+        RootCyNAPSFigures.Fig_3_lists_embedding_2(dataset=subdataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_mineral_N_uptake", name_suffix="_high")
+        # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_AA_Exudation") 
+        # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_AA_Exudation") 
+        # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="radial_import_water", shown_xrange=0.6)
 
         # Then scenario comparisions
         if subdir_custom_name:
@@ -1676,25 +1700,28 @@ def compare_to_exp_biomass_pipeline(dataset, output_path):
 
 def filter_dataset(d, scenario=None, time=None, tmin=None, tmax=None, vids=[], only_keep=None, prop=None, propmin=None, propmax=None, propis=None):
     
+    dims_to_drop = []
     # Save original attributes
     dataset_attrs = d.attrs.copy()
     variable_attrs = {var: d[var].attrs.copy() for var in d.data_vars}
 
     # Extract non-numeric dataarrays like strings (e.g., "label") to reattach later
-    non_numeric_vars = [var for var in d.data_vars if not np.issubdtype(d[var].dtype, np.number)]
-    non_numeric_data = d[non_numeric_vars].copy() if non_numeric_vars else None
+    # non_numeric_vars = [var for var in d.data_vars if not np.issubdtype(d[var].dtype, np.number)]
+    # non_numeric_data = d[non_numeric_vars].copy() if non_numeric_vars else None
 
-    # Drop them temporarily
-    d = d.drop_vars(non_numeric_vars)
+    # # Drop them temporarily
+    # d = d.drop_vars(non_numeric_vars)
 
     if scenario:
-        d = d.where(d.scenario == scenario).sum(dim="scenario")
+        d = d.where(d.scenario == scenario, drop=True) #.sum(dim="scenario")
+        dims_to_drop.append("scenario")
 
     if only_keep:
         d = d[only_keep]
 
     if time:
-        d = d.where(d.t == time).sum(dim="t")
+        d = d.where(d.t == time, drop=True) #.sum(dim="t")
+        dims_to_drop.append("t")
     else:
         if tmin:
             d = d.where(d.t >= tmin)
@@ -1718,14 +1745,17 @@ def filter_dataset(d, scenario=None, time=None, tmin=None, tmax=None, vids=[], o
         d = d.where(d[prop] == propis)
 
     # Reattach string/non-numeric variables
-    if non_numeric_data:
-        d = d.merge(non_numeric_data)
+    # if non_numeric_data:
+    #     # d, non_numeric_data = xr.align(d, non_numeric_data, join="inner")
+    #     d = d.merge(non_numeric_data)
 
     # Restore attributes
     d.attrs.update(dataset_attrs)
     for var in d.data_vars:
         if var in variable_attrs:
             d[var].attrs.update(variable_attrs[var])
+
+    d = d.squeeze()
 
     return d
 
@@ -2513,12 +2543,15 @@ class RootCyNAPSFigures:
 
     def Fig_1_c(scenario_datasets, outputs_path, name_suffix="", xlog = False, c=None, discrete=False):
         massic = True
+        xlim = [1e-5, 1]
+        ylim = [0, 2.1e-8]
+
         if not massic:
             fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lengthy mineral N uptake", c=c, 
-                                            discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix)
+                                            discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
         else:
             fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Massic_mineral_N_uptake", c=c, 
-                                            discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix)
+                                            discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
             
         return fig, ax
 
@@ -2577,7 +2610,7 @@ class RootCyNAPSFigures:
 
                 ax.annotate(test["other_models"]["name"],
                         xy=(k+1, test["other_models"]["value"]),     # The anchor point (in data coordinates)
-                        xytext=(0, +8),       # Offset from the anchor
+                        xytext=(0, -10),       # Offset from the anchor
                         textcoords='offset points',  # Use offset in points, not data units
                         ha='center', va='bottom', fontsize=7)
 
@@ -2613,78 +2646,261 @@ class RootCyNAPSFigures:
 
         return fig, axes
 
-    def Fig_2(final_dataset, outputs_dirpath, distance_bins, flow, normalization_property):
+    def Fig_2(dataset, datasets, distance_bins, flow, normalization_property, outputs_dirpath=None, name_suffix="", shown_xrange=0.15):
         
-        total_normalization_property = final_dataset[normalization_property].sum()
-        total_flow = final_dataset[flow].sum()
+        bin_size_in_meter = 0.005
 
-        first_dataset = final_dataset.where(final_dataset.root_order == 1)
-        if np.any((final_dataset.root_order > 1).values):
-            lateral_dataset = final_dataset.where(final_dataset.root_order > 1)
-        else:
-            lateral_dataset = None
-        # binned_dataset = final_dataset.groupby_bins("distance_from_tip", distance_bins).sum()
-        first_binned_dataset = first_dataset.groupby_bins("distance_from_tip", distance_bins).sum()
-        if lateral_dataset:
-            lateral_binned_dataset = lateral_dataset.groupby_bins("distance_from_tip", distance_bins).sum()
+        total_normalization_property = 0
+        total_flow = 0
+
+        for d in datasets.values():
+            total_normalization_property += d[normalization_property].sum()
+            total_flow += d[flow].sum()
+
+        binned_datasets = {n : d.groupby_bins("distance_from_tip", distance_bins).sum() for n, d in datasets.items()
+                           if len(d["distance_from_tip"].values) > 0}
 
         # Plotting
         fig, ax = plt.subplots(figsize=(8, 5))
 
         # Create labels for each bin
         bin_labels = [0]
-        for bin in first_binned_dataset.distance_from_tip_bins.values:
+        for bin in list(binned_datasets.values())[0].distance_from_tip_bins.values:
             bin_labels.append(bin.right)
         
         # X locations for the bars
         x = np.arange(len(bin_labels))
         width = 0.35  # Width of each bar
 
-        # Plot side-by-side proportion of uptake and struct mass for each root type
-        ax.bar(x[:-1] + 0.5 - width/2, (100 * first_binned_dataset[flow] / total_flow).values, width, label=f'seminal + nodal {flow.replace("_", " ")}', color="green")
-        if lateral_dataset:
-            ax.bar(x[:-1] + 0.5 - width/2, (100 * lateral_binned_dataset[flow] / total_flow).values, width, bottom=(100 * first_binned_dataset[flow] / total_flow).values ,label=f'lateral {flow.replace("_", " ")}', color="limegreen")
+        previous_flow_bottom = 0
+        previous_normalization_bottom = 0
 
-        ax.bar(x[:-1] + 0.5 + width/2, (100 * first_binned_dataset[normalization_property] / total_normalization_property).values, width, label='seminal + nodal {normalization_property.replace("_", " ")}', color="chocolate")
-        if lateral_dataset:
-            ax.bar(x[:-1] + 0.5 + width/2, (100 * lateral_binned_dataset[normalization_property] / total_normalization_property).values, width, bottom=(100 * first_binned_dataset[normalization_property] / total_normalization_property).values , label=f'lateral {normalization_property.replace("_", " ")}', color="darkorange")
+        for i, (name, d) in enumerate(binned_datasets.items()):
+            # Plot side-by-side proportion of flow and normalization property for each root type
+            ax.bar(x[:-1] + 0.5 - width/2, (100 * d[flow] / total_flow).values, width, 
+                   bottom=previous_flow_bottom, label=f'{name} {flow.replace("_", " ")}', color=list(twenty_palette.values())[2*i])
+            previous_flow_bottom += (100 * d[flow] / total_flow).values
+
+            ax.bar(x[:-1] + 0.5 + width/2, (100 * d[normalization_property] / total_normalization_property).values, width, 
+                   bottom=previous_normalization_bottom, label=f'{name} {normalization_property.replace("_", " ")}', color=list(twenty_palette.values())[2*i+1])
+            previous_normalization_bottom += (100 * d[normalization_property] / total_normalization_property).values
 
         # Add labels and title
-        ax.set_xlabel("Distance from tip groups (m)")
+        ax.set_xlabel("Bins boundary distance from tip (m)")
         ax.set_ylabel("% of root system total")
         ax.set_xticks(x)
         ax.set_xticklabels(bin_labels, rotation=45)
         ax.legend(loc="upper right")
-        ax.set_xlim([-0.5, 30])
+        ax.set_xlim([-0.5, int(shown_xrange / bin_size_in_meter)])
         ax.set_ylim([0, 30])
         # ax.grid(True, linestyle='--', alpha=0.6)
 
+        # # Initialize to cumulate
+        # first_sorted_dataset = list(datasets.values())[0].sortby("distance_from_tip")
+        # cumulative_normalization_property_proportion = (first_sorted_dataset[normalization_property].cumsum(dim="vid") / total_normalization_property)
+        # cumulative_flow_proportion = (first_sorted_dataset[flow].cumsum(dim="vid") / total_flow)
+        # for i, (n, d) in enumerate(datasets.items()):
+        #     if i > 0:
+        #         sorted_dataset = d.sortby("distance_from_tip")
+
+        #         # Compute the cumulative sum over the sorted 
+        #         cumulative_normalization_property_proportion += (sorted_dataset[normalization_property].cumsum(dim="vid") / total_normalization_property)
+        #         cumulative_flow_proportion += (sorted_dataset[flow].cumsum(dim="vid") / total_flow)
+
+        sorted_dataset = dataset.sortby("distance_from_tip")
+
+        cumulative_flow_proportion = (sorted_dataset[flow].cumsum(dim="vid") / total_flow)
+        cumulative_normalization_property_proportion = (sorted_dataset[normalization_property].cumsum(dim="vid") / total_normalization_property)
+
+        # Find threshold index where cumulative import exceeds 50%
+        threshold_idx = (cumulative_flow_proportion >= 0.5).argmax().item()
+
+        # Get distance and struct mass proportion at that index
+        distance_at_threshold = float(sorted_dataset["distance_from_tip"][threshold_idx].values)
+        normalization_property_at_threshold = float(cumulative_normalization_property_proportion[threshold_idx].values)
+
+        line_x = distance_at_threshold / bin_size_in_meter
         ymin, ymax = ax.get_ylim()
-
-        distance_at_threshold, norm_prop_at_threshold = RootCyNAPSFigures.Fig_2_polarisation(final_dataset, flow="Net mineral N uptake", normalization_property=normalization_property)
-
-        line_x = 30 * distance_at_threshold / 0.2
         ax.plot([line_x, line_x], [ymin, ymax], color="black", linestyle='dashed')
 
-        ax.text(line_x + 1, 0.9 * ymax, f"50% of flux\n={norm_prop_at_threshold:.2%} of {normalization_property.replace('_', ' ')}")
+        ax.text(line_x + 1, 0.9 * ymax, f"50% of flux\n={normalization_property_at_threshold:.2%} of {normalization_property.replace('_', ' ')}")
 
-        filename = f"Bin_contribution_{flow.replace('_', ' ')}_{final_dataset.t.values}.png"
-
-        fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
+        final_time = int(list(datasets.values())[0].t.max())
+        filename = f"Bin_contribution_{flow.replace('_', ' ')}_{final_time}{name_suffix}.png"
+        if outputs_dirpath:
+            fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
 
         plt.close()
 
-        return distance_at_threshold, float(total_normalization_property.values)
+        return distance_at_threshold, normalization_property_at_threshold
 
+    
+    def Fig_2_one_prop(dataset, datasets, distance_bins, flow, normalization_property, outputs_dirpath=None, name_suffix="", shown_xrange=0.15):
         
+        print(dataset["living_struct_mass"].sum().values)
 
-    def Fig_2_polarisation(final_dataset, flow, normalization_property):
+        bin_size_in_meter = 0.005
 
-        total_normalization_property = final_dataset[normalization_property].sum(dim="vid")
-        total_flow = abs(final_dataset[flow]).sum(dim="vid")
-        sorted_dataset = final_dataset.sortby("distance_from_tip")
+        total_normalization_property = 0
+        total_flow = 0
 
-        # Compute the cumulative sum over the sorted 'length' variable along the 'vid' dimension
+        for d in datasets.values():
+            total_normalization_property += d[normalization_property].sum()
+            total_flow += d[flow].sum()
+
+        binned_datasets = {n : d.groupby_bins("distance_from_tip", distance_bins).sum() for n, d in datasets.items()
+                           if len(d["distance_from_tip"].values) > 0}
+
+        # Plotting
+        fig, ax = plt.subplots(figsize=(8, 5))
+
+        # Create labels for each bin
+        bin_labels = [0]
+        for bin in list(binned_datasets.values())[0].distance_from_tip_bins.values:
+            bin_labels.append(int(bin.right * 1e3))
+        
+        # X locations for the bars
+        x = np.arange(len(bin_labels))
+        width = 0.35 * 2  # Width of each bar
+
+        previous_flow_bottom = 0
+
+        for i, (name, d) in enumerate(binned_datasets.items()):
+            # Plot side-by-side proportion of flow and normalization property for each root type
+            ax.bar(x[:-1] + 0.5, (100 * d[flow] / total_flow).values, width, 
+                   bottom=previous_flow_bottom, label=f'{name}', color=list(twenty_palette.values())[2*i])
+            previous_flow_bottom += (100 * d[flow] / total_flow).values
+
+        # Add labels and title
+        ax.set_xlabel("Bins boundary distance from tip (mm)")
+        ax.set_ylabel(f"% of root system total {flow.replace('_', ' ')}")
+        ax.set_xticks(x)
+        ax.set_xticklabels(bin_labels, rotation=45)
+        ax.legend(loc="upper right")
+        ax.set_xlim([-0.5, int(shown_xrange / bin_size_in_meter)])
+        ax.set_ylim([0, 30])
+        # ax.grid(True, linestyle='--', alpha=0.6)
+
+        # # Initialize to cumulate
+        # first_sorted_dataset = list(datasets.values())[0].sortby("distance_from_tip")
+        # cumulative_normalization_property_proportion = (first_sorted_dataset[normalization_property].cumsum(dim="vid") / total_normalization_property)
+        # cumulative_flow_proportion = (first_sorted_dataset[flow].cumsum(dim="vid") / total_flow)
+        # for i, (n, d) in enumerate(datasets.items()):
+        #     if i > 0:
+        #         sorted_dataset = d.sortby("distance_from_tip")
+
+        #         # Compute the cumulative sum over the sorted 
+        #         cumulative_normalization_property_proportion += (sorted_dataset[normalization_property].cumsum(dim="vid") / total_normalization_property)
+        #         cumulative_flow_proportion += (sorted_dataset[flow].cumsum(dim="vid") / total_flow)
+
+        sorted_dataset = dataset.sortby("distance_from_tip")
+
+        cumulative_flow_proportion = (sorted_dataset[flow].cumsum(dim="vid") / total_flow)
+        cumulative_normalization_property_proportion = (sorted_dataset[normalization_property].cumsum(dim="vid") / total_normalization_property)
+
+        # Find threshold index where cumulative import exceeds 50%
+        threshold_idx = (cumulative_flow_proportion >= 0.5).argmax().item()
+
+        # Get distance and struct mass proportion at that index
+        distance_at_threshold = float(sorted_dataset["distance_from_tip"][threshold_idx].values)
+        normalization_property_at_threshold = float(cumulative_normalization_property_proportion[threshold_idx].values)
+
+        line_x = distance_at_threshold / bin_size_in_meter
+        ymin, ymax = ax.get_ylim()
+        ax.plot([line_x, line_x], [ymin, ymax], color="black", linestyle='dashed')
+
+        ax.text(line_x + 1, 0.9 * ymax, f"50% of flux\n={normalization_property_at_threshold:.2%} of {normalization_property.replace('_', ' ')}")
+
+        final_time = int(list(datasets.values())[0].t.max())
+        filename = f"Bin_contribution_{flow.replace('_', ' ')}_{final_time}{name_suffix}.png"
+
+        if outputs_dirpath:
+            fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
+
+        plt.close()
+
+        return distance_at_threshold
+
+    def Fig_2_stacked(dataset, datasets, distance_bins, flow, normalization_property, outputs_dirpath=None, name_suffix="", shown_xrange=0.15):
+        
+        bin_size_in_meter = 0.005
+
+        total_normalization_property = 0
+        total_flow = 0
+
+        for d in datasets.values():
+            total_normalization_property += d[normalization_property].sum()
+            total_flow += d[flow].sum()
+
+        binned_datasets = {n : d.groupby_bins("distance_from_tip", distance_bins).sum() for n, d in datasets.items()
+                           if len(d["distance_from_tip"].values) > 0}
+        
+        binned_dataset_total = dataset.groupby_bins("distance_from_tip", distance_bins).sum()
+
+        # Plotting
+        fig, axes = plt.subplots(nrows=len(datasets) + 1, figsize=(8, 5))
+
+        # Create labels for each bin
+        bin_labels = [0]
+        for bin in list(binned_datasets.values())[0].distance_from_tip_bins.values:
+            bin_labels.append(bin.right)
+        
+        # X locations for the bars
+        x = np.arange(len(bin_labels))
+        width = 0.35  # Width of each bar
+
+        previous_flow_bottom = 0
+        previous_normalization_bottom = 0
+
+        # Plot side-by-side proportion of flow and normalization property for each root type
+        axes[0].bar(x[:-1] + 0.5 - width/2, (100 * binned_dataset_total[flow] / total_flow).values, width, 
+                bottom=previous_flow_bottom, label=f'all roots {flow.replace("_", " ")}', color=list(twenty_palette.values())[0])
+        # previous_flow_bottom += (100 * d[flow] / total_flow).values
+
+        axes[0].bar(x[:-1] + 0.5 + width/2, (100 * binned_dataset_total[normalization_property] / total_normalization_property).values, width, 
+                bottom=previous_normalization_bottom, label=f'all roots {normalization_property.replace("_", " ")}', color=list(twenty_palette.values())[1])
+        
+        axes[0].set_xticklabels([]) 
+        axes[0].legend(loc="right")
+        axes[0].set_xticks(x)
+        axes[0].set_xticklabels([]) 
+        axes[0].set_xlim([-0.5, int(shown_xrange / bin_size_in_meter)])
+
+        for i, (name, d) in enumerate(binned_datasets.items()):
+            i = i + 1
+
+            total_normalization_property_local = d[normalization_property].sum()
+            total_flow_local = d[flow].sum()
+
+            # Plot side-by-side proportion of flow and normalization property for each root type
+            axes[i].bar(x[:-1] + 0.5 - width/2, (100 * d[flow] / total_flow_local).values, width, 
+                   bottom=previous_flow_bottom, label=f'{name} {flow.replace("_", " ")}', color=list(twenty_palette.values())[2*i])
+            # previous_flow_bottom += (100 * d[flow] / total_flow).values
+
+            axes[i].bar(x[:-1] + 0.5 + width/2, (100 * d[normalization_property] / total_normalization_property_local).values, width, 
+                   bottom=previous_normalization_bottom, label=f'{name} {normalization_property.replace("_", " ")}', color=list(twenty_palette.values())[2*i+1])
+            # previous_normalization_bottom += (100 * d[normalization_property] / total_normalization_property).values
+
+            # Add labels and title
+            if i == len(axes)-1:
+                axes[i].set_xlabel("Bins boundary distance from tip (m)")
+                
+                axes[i].set_xticks(x)
+                axes[i].set_xticklabels(bin_labels, rotation=45)
+            else:
+                axes[i].set_xticks(x)
+                axes[i].set_xticklabels([]) 
+
+            axes[i].legend(loc="right")
+            axes[i].set_xlim([-0.5, int(shown_xrange / bin_size_in_meter)])
+            ymin, ymax = axes[i].get_ylim()
+            axes[i].set_ylim([0, ymax])
+            # ax.grid(True, linestyle='--', alpha=0.6)
+        
+        fig.supylabel("% of root type total")
+
+        # First treshold shown
+        sorted_dataset = dataset.sortby("distance_from_tip")
         cumulative_normalization_property_proportion = (sorted_dataset[normalization_property].cumsum(dim="vid") / total_normalization_property)
         cumulative_flow_proportion = (sorted_dataset[flow].cumsum(dim="vid") / total_flow)
 
@@ -2692,80 +2908,236 @@ class RootCyNAPSFigures:
         threshold_idx = (cumulative_flow_proportion >= 0.5).argmax().item()
 
         # Get distance and struct mass proportion at that index
-        distance_at_threshold = sorted_dataset["distance_from_tip"][threshold_idx]
-        normalization_property_at_threshold = cumulative_normalization_property_proportion[threshold_idx]
+        distance_at_threshold = float(sorted_dataset["distance_from_tip"][threshold_idx].values)
+        normalization_property_at_threshold = float(cumulative_normalization_property_proportion[threshold_idx].values)
 
-        return float(distance_at_threshold.values), float(normalization_property_at_threshold.values)
-    
-    
-    def Fig_2_lines(final_dataset, outputs_dirpath, distance_bins, flow, normalization_property):
-        
-        total_normalization_property = final_dataset[normalization_property].sum()
-        total_flow = final_dataset[flow].sum()
+        xmin, xmax = axes[0].get_ylim()
+        line_x = distance_at_threshold / bin_size_in_meter
+        ymin, ymax = axes[0].get_ylim()
+        axes[0].plot([line_x, line_x], [ymin, ymax], color="black", linestyle='dashed')
 
-        first_dataset = final_dataset.where(final_dataset.root_order == 1)
-        if np.any((final_dataset.root_order > 1).values):
-            lateral_dataset = final_dataset.where(final_dataset.root_order > 1)
-        else:
-            lateral_dataset = None
+        axes[0].text(line_x + 1, 0.8 * ymax, f"50% of flux = {normalization_property_at_threshold:.1%} of {normalization_property.replace('_', ' ')}")
 
-        binned_dataset = final_dataset.groupby_bins("distance_from_tip", distance_bins).sum()
-        first_binned_dataset = first_dataset.groupby_bins("distance_from_tip", distance_bins).sum()
-        if lateral_dataset:
-            lateral_binned_dataset = lateral_dataset.groupby_bins("distance_from_tip", distance_bins).sum()
+        # Initialize to cumulate
+        for i, (n, d) in enumerate(datasets.items()):
+            i = i + 1
+            if len(d['distance_from_tip'].values) > 0:
+                sorted_dataset = d.sortby("distance_from_tip")
+                total_normalization_property_local = d[normalization_property].sum()
+                total_flow_local = d[flow].sum()
+                # Compute the cumulative sum over the sorted 
+                cumulative_normalization_property_proportion = (sorted_dataset[normalization_property].cumsum(dim="vid") / total_normalization_property_local)
+                cumulative_flow_proportion = (sorted_dataset[flow].cumsum(dim="vid") / total_flow_local)
 
-        # Plotting
-        fig, ax = plt.subplots(figsize=(8, 5))
+                # Find threshold index where cumulative import exceeds 50%
+                threshold_idx = (cumulative_flow_proportion >= 0.5).argmax().item()
 
-        # Create labels for each bin
-        bin_labels = [0]
-        for bin in first_binned_dataset.distance_from_tip_bins.values:
-            bin_labels.append(bin.right)
-        
-        # X locations for the bars
-        x = np.arange(len(bin_labels))
-        width = 0.35  # Width of each bar
+                # Get distance and struct mass proportion at that index
+                distance_at_threshold = float(sorted_dataset["distance_from_tip"][threshold_idx].values)
+                normalization_property_at_threshold = float(cumulative_normalization_property_proportion[threshold_idx].values)
 
-        # Plot side-by-side proportion of uptake and struct mass for each root type
-        
-        if lateral_dataset:
-            ax.plot(x[:-1] + 0.5 - width/2, (100 * first_binned_dataset[flow] / total_flow).values, width, label=f'seminal + nodal {flow.replace("_", " ")}', color="green")
-            ax.plot(x[:-1] + 0.5 - width/2, (100 * lateral_binned_dataset[flow] / total_flow).values, width, label=f'lateral {flow.replace("_", " ")}', color="limegreen")
-        ax.plot(x[:-1] + 0.5 - width/2, (100 * binned_dataset[flow] / total_flow).values, width, label=f'total bin {flow.replace("_", " ")}', color="darkgreen")
-        
-        if lateral_dataset:
-            ax.plot(x[:-1] + 0.5 + width/2, (100 * first_binned_dataset[normalization_property] / total_normalization_property).values, width, label=f'seminal + nodal {normalization_property.replace("_", " ")}', color="chocolate")
-            ax.plot(x[:-1] + 0.5 + width/2, (100 * lateral_binned_dataset[normalization_property] / total_normalization_property).values, width, label=f'lateral {normalization_property.replace("_", " ")}', color="darkorange")
-        ax.plot(x[:-1] + 0.5 + width/2, (100 * binned_dataset[normalization_property] / total_normalization_property).values, width, label=f'total bin {normalization_property.replace("_", " ")}', color="black")
+                line_x = distance_at_threshold / bin_size_in_meter
+                ymin, ymax = axes[i].get_ylim()
+                axes[i].plot([line_x, line_x], [ymin, ymax], color="black", linestyle='dashed')
 
+                axes[i].text(line_x + 1, 0.8 * ymax, f"50% of flux = {normalization_property_at_threshold:.1%} of {normalization_property.replace('_', ' ')}")
 
-        # Add labels and title
-        ax.set_xlabel("Distance from tip groups (m)")
-        ax.set_ylabel("% of root system total")
-        ax.set_xticks(x)
-        ax.set_xticklabels(bin_labels, rotation=45)
-        ax.legend(loc="upper right")
-        ax.set_xlim([-0.5, 30])
-        ax.set_ylim([0, 30])
-        # ax.grid(True, linestyle='--', alpha=0.6)
+        final_time = int(list(datasets.values())[0].t.max())
+        filename = f"Stacked_bin_contribution_{flow.replace('_', ' ')}_{final_time}{name_suffix}.png"
 
-        ymin, ymax = ax.get_ylim()
-
-        distance_at_threshold, norm_prop_at_threshold = RootCyNAPSFigures.Fig_2_polarisation(final_dataset, flow="Net mineral N uptake", normalization_property=normalization_property)
-
-        line_x = 30 * distance_at_threshold / 0.2
-        ax.plot([line_x, line_x], [ymin, ymax], color="black", linestyle='dashed')
-
-        ax.text(line_x + 1, 0.9 * ymax, f"50% of flux\n={norm_prop_at_threshold:.2%} of {normalization_property.replace('_', ' ')}")
-
-        filename = f"Bin_contribution_{flow.replace('_', ' ')}_{final_dataset.t.values}.png"
-
-        fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
+        if outputs_dirpath:
+            fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
 
         plt.close()
 
-        return distance_at_threshold, float(total_normalization_property.values)
+        return distance_at_threshold
+    
 
+    def Fig_3_embedding_2(dataset, scenarios, outputs_dirpath, flow, shown_xrange=0.15, name_suffix=""):
+
+        step = 0.005
+        # distance_bins = np.arange(dataset["distance_from_tip"].min(), 
+        #                         dataset["distance_from_tip"].max() + step, step)
+        distance_bins = np.arange(0, 
+                                dataset["distance_from_tip"].max() + step, step)
+        scenario_times = dict(zip(scenarios, dataset.t.values))
+        grouping_distances = []
+        apex_numbers = []
+        apex_length_density = []
+        C_consummed_per_apex = []
+        
+        for scenario in scenarios:
+            print(f"[INFO] Processing scenario {scenario}")
+            raw_dirpath = os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_raw/")
+
+            scenario_dataset = filter_dataset(dataset, scenario=scenario)
+
+            all_axes = [axis_id for axis_id in scenario_dataset["axis_index"].values.flatten() if isinstance(axis_id, str)]
+            unique = np.unique(all_axes)
+
+            seminal_id = [axis_id for axis_id in unique if axis_id.startswith("seminal")]
+            nodal_id = [axis_id for axis_id in unique if axis_id.startswith("adventitious")]
+            laterals_id = [axis_id for axis_id in unique if axis_id.startswith("lateral")]
+            
+            final_dataset = filter_dataset(scenario_dataset, time=scenario_times[scenario])[["distance_from_tip", "root_order", "axis_index", "label", "struct_mass", "length", "Lengthy mineral N uptake", "Massic_mineral_N_uptake", "hexose_consumption_by_growth", "C_hexose_root", flow]]
+
+            seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
+            nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
+            lateral_dataset = final_dataset.where(final_dataset["axis_index"].isin(laterals_id), drop=True)
+
+            plotted_datasets = dict(seminals=seminal_dataset, nodals=nodal_dataset, laterals=lateral_dataset)
+
+            # ALTERNATIVE WITH STR
+            t = final_dataset.where(final_dataset["struct_mass"] > 0)["label"].values.flatten()
+            apex_number = np.sum(t == "Apex")
+            apex_numbers.append(apex_number)
+            apex_length_density.append(apex_number/ float(final_dataset["length"].sum()))
+            C_consummed_per_apex.append(float(final_dataset["hexose_consumption_by_growth"].sum()) / apex_number)
+
+            shown_xrange = shown_xrange
+            grouping_distance = RootCyNAPSFigures.Fig_2(final_dataset, plotted_datasets, raw_dirpath, distance_bins, flow=flow, normalization_property="length", shown_xrange=shown_xrange)
+            RootCyNAPSFigures.Fig_2_stacked(final_dataset, plotted_datasets, raw_dirpath, distance_bins, flow=flow, normalization_property="length", shown_xrange=shown_xrange)
+
+            grouping_distances.append(grouping_distance)
+            # sucrose_input_rate = sucrose_input_df.loc[sucrose_input_df["t"] == scenario_times[scenario], "sucrose_input_rate"].item()
+            
+
+        fig, ax = plt.subplots()
+        # plotted = ax.scatter(grouping_distances, normalized_input_flux, c=np.array(list(scenario_times.values())) / 24)
+        ax.plot(np.array(list(scenario_times.values())) / 24, grouping_distances, color=colorblind_palette["black"], label="50% grouping distance")
+        ax2 = ax.twinx()
+        ax2.plot(np.array(list(scenario_times.values())) / 24, C_consummed_per_apex, color=colorblind_palette["green"], label="C consumption per apex")
+
+        xunit = "day"
+        ax.set_xlabel(f"Plant age ({xunit})")
+        yunit = "m"
+        # ax.set_ylabel(rf"$Normalized sucrose input rate\ \mathrm{{({yunit})}}$")
+        ax.set_ylabel(f"Distance from tip grouping 50% of {flow} ({unit_from_str(yunit)})")
+        # ax2.set_ylabel(f"Apex density ({unit_from_str('m-1')} of root length)")
+        ax2.set_ylabel(f"C consummed per apex ({unit_from_str('mol.s-1')})")
+
+        fig.savefig(os.path.join(outputs_dirpath, f"50%_{flow}_grouping_distance_dynamic{name_suffix}.png"), dpi=720, bbox_inches="tight")
+
+    def Fig_3_lists_embedding_2(dataset, scenarios, outputs_dirpath, flow, shown_xrange=0.15, name_suffix=""):
+
+        step = 0.005
+        # distance_bins = np.arange(dataset["distance_from_tip"].min(), 
+        #                         dataset["distance_from_tip"].max() + step, step)
+        distance_bins = np.arange(0, 
+                                dataset["distance_from_tip"].max() + step, step)
+        scenario_times = dict(zip(scenarios, dataset.t.values))
+        
+
+        parallel = True
+        
+        if parallel:
+            processes = []
+            max_processes = int(mp.cpu_count() / 2)
+            with mp.Manager() as manager:
+                results = manager.dict()
+
+                for scenario in scenarios:
+                    print(f"[INFO] Processing scenario {scenario}")
+        
+                    while len(processes) == max_processes:
+                        processes = [p for p in processes if p.is_alive()]
+                        time.sleep(1)
+                    
+                    p = mp.Process(target=RootCyNAPSFigures.embedded_Fig2, kwargs=dict(dataset=dataset, scenario=scenario, scenario_times=scenario_times, 
+                                                                    distance_bins=distance_bins, flow=flow, shown_xrange=shown_xrange,
+                                                                    shared_dict=results))
+                    p.start()
+                    processes.append(p)
+
+                for p in processes:
+                    p.join()
+
+                # Unpacking results
+                grouping_distances_dict = {k: v for k, v in results["grouping_distance"]}
+                grouping_distances = [grouping_distances_dict[k] for k in sorted(grouping_distances_dict)]
+
+                corresponding_length_dict = {k: v for k, v in results["grouping_length"]}
+                corresponding_length = [corresponding_length_dict[k] for k in sorted(corresponding_length_dict)]
+
+                C_consummed_per_apex_dict = {k: v for k, v in results["C_consummed_per_apex"]}
+                C_consummed_per_apex_list = [C_consummed_per_apex_dict[k] for k in sorted(C_consummed_per_apex_dict)]
+
+        else:
+            grouping_distances = []
+            apex_numbers = []
+            apex_length_densities = []
+            C_consummed_per_apex_list = []
+            corresponding_length = []
+            for scenario in scenarios:
+                print(f"[INFO] Processing scenario {scenario}")
+            
+                apex_number, apex_length_density, C_consummed_per_apex, grouping_distance, grouping_length = RootCyNAPSFigures.embedded_Fig2(dataset, scenario, scenario_times, distance_bins, flow, shown_xrange)
+            
+                apex_numbers.append(apex_number)
+                apex_length_densities.append(apex_length_density)
+                C_consummed_per_apex_list.append(C_consummed_per_apex)
+                grouping_distances.append(grouping_distance)
+                corresponding_length.append(grouping_length)
+                # sucrose_input_rate = sucrose_input_df.loc[sucrose_input_df["t"] == scenario_times[scenario], "sucrose_input_rate"].item()
+            
+        fig, ax = plt.subplots(ncols=1, nrows=3)
+        # plotted = ax.scatter(grouping_distances, normalized_input_flux, c=np.array(list(scenario_times.values())) / 24)
+        for i, (name, var) in enumerate({f"50%_{flow}_grouping_distance_dynamic".replace("_", " "): grouping_distances, 
+                                         "Corresponding root length %": corresponding_length, 
+                                         f"C allocation per apex ({unit_from_str('mol.s-1')})": C_consummed_per_apex_list}.items()):
+            ax[i].plot(np.array(list(scenario_times.values())) / 24, var, color=list(colorblind_palette.values())[i])
+
+            xunit = "day"
+            ax[i].set_xlabel(f"Plant age ({xunit})")
+            ax[i].set_title(f"{name}")
+            # ax[i].set_ylabel(f"{name}")
+            if i < len(ax) - 1:
+                ax[i].set_xlabel('')          # remove x-axis label
+                ax[i].set_xticklabels([])     # remove x-axis tick labels
+                # ax[i].tick_params(axis='x', length=0)  # remove x-axis ticks
+
+
+        fig.subplots_adjust(hspace=0.3) 
+        fig.savefig(os.path.join(outputs_dirpath, f"final_graph_{flow}{name_suffix}" + ".png"), dpi=720, bbox_inches="tight")
+
+
+    def embedded_Fig2(dataset, scenario, scenario_times, distance_bins, flow, shown_xrange, shared_dict=None):
+
+        scenario_dataset = filter_dataset(dataset, scenario=scenario)
+
+        all_axes = [axis_id for axis_id in scenario_dataset["axis_index"].values.flatten() if isinstance(axis_id, str)]
+        unique = np.unique(all_axes)
+
+        seminal_id = [axis_id for axis_id in unique if axis_id.startswith("seminal")]
+        nodal_id = [axis_id for axis_id in unique if axis_id.startswith("adventitious")]
+        laterals_id = [axis_id for axis_id in unique if axis_id.startswith("lateral")]
+        
+        final_dataset = filter_dataset(scenario_dataset, time=scenario_times[scenario])
+
+        seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
+        nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
+        lateral_dataset = final_dataset.where(final_dataset["axis_index"].isin(laterals_id), drop=True)
+
+        plotted_datasets = dict(seminals=seminal_dataset, nodals=nodal_dataset, laterals=lateral_dataset)
+
+        # ALTERNATIVE WITH STR
+        t = final_dataset.where(final_dataset["struct_mass"] > 0)["label"].values.flatten()
+        apex_number = np.sum(t == "Apex")
+        apex_length_density = apex_number/ float(final_dataset["length"].sum())
+        C_consummed_per_apex = float(final_dataset["hexose_consumption_by_growth"].sum()) / apex_number
+        
+        grouping_distance, grouping_length = RootCyNAPSFigures.Fig_2(final_dataset, plotted_datasets, distance_bins, flow=flow, normalization_property="length", shown_xrange=shown_xrange)
+        RootCyNAPSFigures.Fig_2_stacked(final_dataset, plotted_datasets, distance_bins, flow=flow, normalization_property="length", shown_xrange=shown_xrange)
+
+        if shared_dict is not None:
+            local_result = dict(apex_number=apex_number, apex_length_density=apex_length_density, C_consummed_per_apex=C_consummed_per_apex,
+                                grouping_distance=grouping_distance, grouping_length=grouping_length)
+            for k, v in local_result.items():
+                if k not in shared_dict:
+                    shared_dict[k] = []
+                shared_dict[k] += [(scenario_times[scenario], v)]
+        else:
+            return apex_number, apex_length_density, C_consummed_per_apex, grouping_distance, grouping_length
 
 class Indicators:
 
@@ -2814,7 +3186,7 @@ class Indicators:
         return d.diffusion_AA_soil + d.diffusion_AA_soil_xylem - d.import_AA
     
     def Gross_C_Rhizodeposition(d):
-        return d.Gross_Hexose_Exudation * 6 + d.Gross_AA_Exudation * 5
+        return d.Gross_Hexose_Exudation * 6 + d.mucilage_secretion + d.phloem_hexose_exudation + d.cells_release - d.hexose_uptake_from_soil
 
     def Rhizodeposits_CN_Ratio(d):
         return (d.Gross_Hexose_Exudation * 6 + d.Gross_AA_Exudation * 5) / (d.Gross_AA_Exudation.where(d.Gross_AA_Exudation > 0.) *1.4)
@@ -2842,7 +3214,7 @@ class Indicators:
     def compute(d, formula):
         variables = set(re.findall(r'\b[a-zA-Z_]\w*\b', formula))
 
-        units = {var: ureg(XarrayPlotting.expand_compact_units(d[var].unit.replace("-", "^-"))) for var in variables}
+        units = {var: ureg(expand_compact_units(d[var].unit.replace("-", "^-"))) for var in variables}
 
         result = eval(formula, {}, d)
 
@@ -2855,7 +3227,7 @@ class Indicators:
 class XarrayPlotting:
 
     def scatter_xarray(dataset, outputs_dirpath, x: str, y: str, c: str=None, discrete: bool=False, s: int=None, name_suffix: str="", 
-                       xlog: bool=False, ylog: bool=False):
+                       xlog: bool=False, ylog: bool=False, xlim=None, ylim=None):
         
         fig, ax = plt.subplots()
 
@@ -2915,6 +3287,12 @@ class XarrayPlotting:
         if discrete:
                 ax.legend(markerscale=2.5)
 
+        if xlim:
+            ax.set_xlim(xlim)
+
+        if ylim:
+            ax.set_ylim(ylim)
+
         filename = f"Scatter_{y}_vs_{x}_colored_by_{c}{name_suffix}.png"
 
         fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
@@ -2931,7 +3309,7 @@ class XarrayPlotting:
             dataset = {"single_dataset": dataset}
 
             x_unit = ureg(dataset[x].unit.replace("-", "^-"))
-            x_unit = XarrayPlotting.latex_unit_compact(x_unit)
+            x_unit = latex_unit_compact(x_unit)
             y_unit = ureg(dataset[y].unit.replace("-", "^-"))
             if c:
                 c_unit = ureg(dataset[c].unit.replace("-", "^-"))
@@ -2969,27 +3347,26 @@ class XarrayPlotting:
 
         plt.close()
 
-    def expand_compact_units(unit_str):
-        # Replace e.g., "m3" with "m**3" but only if followed by a digit
-        unit_str = re.sub(r"([a-zA-Z]+)(\d+)", r"\1**\2", unit_str)
-        # Replace "." with "*", in case it's dot-separated
-        unit_str = unit_str.replace('.', '*')
-        return unit_str
 
-    def latex_unit_compact(unit):
-        # unit.units is a UnitsContainer: {unit_name: exponent}
-        parts = []
-        for base_unit, exponent in unit.units._units.items():
-            # Format each unit in LaTeX with abbreviations
-            unit_str = f"\\mathrm{{{ureg.Unit(base_unit):~}}}"  # ~ = abbreviated
-            if exponent != 1:
-                unit_str += f"^{{{int(exponent)}}}"
-            parts.append(unit_str)
-        
-        return "$" + " \\cdot ".join(parts) + "$"
 
-def unit_from_str(unit):
-    to_ureg = ureg(XarrayPlotting.expand_compact_units(unit.replace("-", "^-")))
-    to_latex = XarrayPlotting.latex_unit_compact(to_ureg)
 
-    return to_latex
+def meije_question(d, target_time):
+    time_step = 3600
+    hexose_molar_mass = 180.156
+    final_rhizodeposited_C = float(d["Gross_Hexose_Exudation"].sum() * time_step) * hexose_molar_mass
+    # cumulated_respiration = d["resp_growth"].sum() * time_step * 12
+
+    final_time = float(d.t.max())
+
+    senesced_elements = d.where(d.type == "Dead")
+    non_senesced_elements = d.where(d.type !="Dead")
+    final_struct_mass = float(non_senesced_elements.sel(t=final_time)["struct_mass"].sum())
+
+    senesced_C = float((senesced_elements.sel(t=final_time)["C_hexose_root"] * senesced_elements.sel(t=final_time)["struct_mass"]).sum() * hexose_molar_mass
+                       + senesced_elements.sel(t=final_time)["struct_mass"].sum())
+
+    print("Raw", final_rhizodeposited_C, senesced_C)
+
+    print("Normalized", final_rhizodeposited_C/final_struct_mass, senesced_C/final_struct_mass)
+
+    return
