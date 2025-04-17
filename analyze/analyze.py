@@ -2,6 +2,7 @@ import os
 import time
 import pickle
 import shutil
+import psutil
 import imageio
 import multiprocessing as mp
 from PIL import Image, ImageDraw, ImageFont
@@ -21,9 +22,10 @@ pd.set_option("display.width", 0)  # Adjusts to screen width
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, FFMpegWriter
-from matplotlib.ticker import FuncFormatter, LogFormatterSciNotation, ScalarFormatter
+from matplotlib.ticker import FuncFormatter, LogFormatterSciNotation, ScalarFormatter, StrMethodFormatter
 from matplotlib.colors import LogNorm
 import matplotlib.patches as mpatches
+from mpl_toolkits.mplot3d import Axes3D
 
 import xarray as xr
 from pint import UnitRegistry
@@ -151,6 +153,24 @@ aliases = dict(
 
 )
 
+def memory_requiered_slice(age_in_hour):
+    age_in_days = age_in_hour / 24
+    return age_in_days * 2 / 50
+
+def memory_required(age_in_hour):
+    age_in_days = age_in_hour / 24
+    return age_in_days * (age_in_days * 2 / 50) / 2
+
+def has_enough_memory(required_gb):
+    """Check if there's enough available memory in GB."""
+    available_gb = psutil.virtual_memory().available / (1024 ** 3)
+    enough_memory = available_gb >= required_gb
+    if not enough_memory:
+        print(f"Not enough memory: {available_gb:.2f} GB available and asked {required_gb} GB more")
+    return enough_memory
+
+
+
 ureg = UnitRegistry()
 
 
@@ -176,6 +196,19 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
         print("     [INFO] Finished DL")
     if animate_raw_logs:
         print("     [INFO] Starting plot production from raw logs...")
+
+        unique_times = sorted([10, 20, 30, 40, 50, 60])
+        # scenario_concentrations = [0.1,	0.01, 0.05, 0.5, 5,	50]
+        unique_concentrations = sorted([0.01, 0.05, 0.5, 5, 50])
+        manual_scenario_times = {}
+        scenario_concentrations = {}
+        scenarios = []
+        for concentration in unique_concentrations:
+            for time in unique_times:
+                scenario = f"RC_ref_{concentration}_{time}D"
+                scenarios.append(scenario)
+                manual_scenario_times[scenario] = time
+                scenario_concentrations[scenario] = concentration
         
         fps=5
         dataset = open_and_merge_datasets(scenarios=scenarios, root_outputs_path=outputs_dirpath)
@@ -184,7 +217,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
         #dataset["Cumulative_Nitrogen_Uptake"] = Indicators.Cumulative_Nitrogen_Uptake(d=dataset)
         #dataset["Cumulative_Carbon_Costs"] = Indicators.Cumulative_Carbon_Costs(d=dataset)
         dataset["Gross_Hexose_Exudation"] = Indicators.Gross_Hexose_Exudation(d=dataset)
-        dataset["Net_AA_Exudation"] = Indicators.compute(d=dataset, formula="diffusion_AA_soil + diffusion_AA_soil_xylem - import_AA")
+        dataset["Net_AA_Exudation"] = Indicators.compute(d=dataset, formula="diffusion_AA_soil + apoplastic_AA_soil_xylem - import_AA")
         #dataset["Gross_C_Rhizodeposition"] = Indicators.Gross_C_Rhizodeposition(d=dataset)
         #dataset["Rhizodeposits_CN_Ratio"] = Indicators.Rhizodeposits_CN_Ratio(d=dataset)
         #dataset["CN_Ratio_Cumulated_Rhizodeposition"] = Indicators.CN_Ratio_Cumulated_Rhizodeposition(d=dataset)
@@ -196,9 +229,18 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
         dataset["Root_Hairs_Proportion"] = Indicators.Root_Hairs_Proportion(d=dataset)
         dataset["Labile_Nitrogen"] = Indicators.Labile_Nitrogen(d=dataset)
         dataset["cylinder_surface"] = Indicators.cylinder_surface(d=dataset)
-        dataset["Net_mineral_N_uptake"] = Indicators.compute(d=dataset, formula="import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - diffusion_Nm_soil_xylem")
-        dataset["Lengthy mineral N uptake"] = Indicators.compute(d=dataset, formula="(import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - diffusion_Nm_soil_xylem) / length")
-        dataset["Massic_mineral_N_uptake"] = Indicators.compute(d=dataset, formula="(import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - diffusion_Nm_soil_xylem) / struct_mass")
+        dataset["Net_mineral_N_uptake"] = Indicators.compute(d=dataset, formula="import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - apoplastic_Nm_soil_xylem")
+        dataset["Lengthy mineral N uptake"] = Indicators.compute(d=dataset, formula="(import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - apoplastic_Nm_soil_xylem) / length")
+        dataset["Massic_mineral_N_uptake"] = Indicators.compute(d=dataset, formula="(import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - apoplastic_Nm_soil_xylem) / struct_mass")
+        dataset["Massic_import_Nm"] = Indicators.compute(d=dataset, formula="import_Nm / struct_mass")
+        dataset["Massic_mycorrhizal_mediated_import_Nm"] = Indicators.compute(d=dataset, formula="mycorrhizal_mediated_import_Nm / struct_mass")
+        dataset["Massic_diffusion_Nm_soil"] = Indicators.compute(d=dataset, formula=" - diffusion_Nm_soil / struct_mass")
+        dataset["Massic_apoplastic_Nm_soil_xylem"] = Indicators.compute(d=dataset, formula=" - apoplastic_Nm_soil_xylem / struct_mass")
+        dataset["Massic_export_xylem"] = Indicators.compute(d=dataset, formula = "(export_Nm - diffusion_Nm_xylem - apoplastic_Nm_soil_xylem) / struct_mass")
+        dataset["Massic_root_exchange_surface"] = Indicators.compute(d=dataset, formula = "root_exchange_surface / struct_mass")
+        dataset["Massic_radial_import_water"] = Indicators.compute(d=dataset, formula = "radial_import_water / struct_mass")
+        dataset["Net_mineral_N_export"] = Indicators.compute(d=dataset, formula = "export_Nm - diffusion_Nm_xylem - apoplastic_Nm_soil_xylem")
+
 
         # Z contributions
         zcontrib_flow = "import_Nm"
@@ -239,7 +281,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
                 # meije_question(scenario_dataset)
                 
                 ### Fig 1 d related
-                running = False
+                running = True
 
                 if running:
 
@@ -247,18 +289,20 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
                     simple_uptake_per_struct_mass = final_dataset["simple_import_Nm"].sum() / final_dataset["struct_mass"].sum()
 
                     comparision_instructions = {
-                        "Massic_mineral_N_uptake" : dict(paper="Devienne et al. 1994", reported_min=1.67e-9, reported_max=2.28e-8, other_models=dict(name="Uniform Michaelis-Menten", value=simple_uptake_per_struct_mass)),
+                        "Net_mineral_N_uptake" : dict(paper="Devienne et al. 1994", reported_min=1.67e-9, reported_max=2.28e-8, normalize_by='struct_mass', other_models=dict(name="Uniform Michaelis-Menten", value=simple_uptake_per_struct_mass)),
                         "Net_AA_Exudation": dict(paper="Cao et al., 2021", reported_min=8.3e-13, reported_max=2.1e-9, normalize_by='struct_mass'),
                         "Nm": dict(paper="Siddiqi et al. 1989", reported_min=1e-5, reported_max=5e-3),
                         "AA": dict(paper="Azevedo Neto et al. 2009", reported_min=6.395e-4, reported_max=1.186e-3),
-                        "radial_import_water": dict(paper="Fischer et al. 1966", reported_min=1e-5, reported_max=7e-4, normalize_by='struct_mass'),
+                        "radial_import_water": dict(paper="Fischer et al. 1966", reported_min=1.8e-10, reported_max=1.26e-8, normalize_by='struct_mass'),
                         #"Nm_root_shoot_xylem": dict(paper="Fischer et al. 1966", reported_min=1e-5, reported_max=4.7e-4, normalize_by='struct_mass'),
                     }
                     RootCyNAPSFigures.Fig_1_d(final_dataset, comparision_instructions, raw_dirpath, suffix_name=f"_{scenario_times[scenario]}")
+
+                    plt.close()
                 
                 
                 ### Fig 1 c related
-                running = False
+                running = True
 
                 if running:
 
@@ -271,25 +315,36 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
 
                     color="C_hexose_root"
                     
-                    final_dataset = scenario_dataset.sel(t=scenario_times[scenario])[[color, "distance_from_tip", "root_order", "axis_index", "struct_mass", "length", "Net_mineral_N_uptake", "Lengthy mineral N uptake", "Massic_mineral_N_uptake", "Net_AA_Exudation", "C_hexose_root"]]
-                    
+                    final_dataset = scenario_dataset.sel(t=scenario_times[scenario])[[
+                      color, "distance_from_tip", "thermal_time_since_cells_formation", "root_order", "axis_index", "struct_mass", "length",   # Always
+                      "Net_mineral_N_uptake", "Lengthy mineral N uptake", "Massic_mineral_N_uptake", "Massic_import_Nm", "Massic_mycorrhizal_mediated_import_Nm", # Specific  
+                      "Massic_apoplastic_Nm_soil_xylem", "Net_AA_Exudation", 
+                      "C_hexose_root", "Nm", "root_exchange_surface", "radial_import_water", "Massic_export_xylem", "Massic_root_exchange_surface", "Massic_radial_import_water", "axial_export_water_up",
+                      ]]
+                    # final_dataset = scenario_dataset.sel(t=scenario_times[scenario])
                     seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
                     nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
                     lateral_dataset = final_dataset.where(final_dataset["axis_index"].isin(laterals_id), drop=True)
-
+                    
                     per_root_type_ds = dict(seminal=seminal_dataset, nodal=nodal_dataset, lateral=lateral_dataset)
                     first_order_ds = dict(seminal=seminal_dataset, nodal=nodal_dataset)
                     
                     RootCyNAPSFigures.Fig_1_c(per_root_type_ds, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}", discrete=True, xlog=False)
-                    RootCyNAPSFigures.Fig_1_c(per_root_type_ds, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_log", discrete=True, xlog=True)
-                    RootCyNAPSFigures.Fig_1_c(first_order_ds, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_order1_log", discrete=True, xlog=True)
+                    # RootCyNAPSFigures.Fig_1_c(per_root_type_ds, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_log", discrete=True, xlog=True)
+                    # RootCyNAPSFigures.Fig_1_c(first_order_ds, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_order1_log", discrete=True, xlog=True)
 
-                    RootCyNAPSFigures.Fig_1_c(lateral_dataset, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_laterals", xlog=True, c=color)
-                    RootCyNAPSFigures.Fig_1_c(seminal_dataset, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_seminals", xlog=True, c=color)
-                    RootCyNAPSFigures.Fig_1_c(nodal_dataset, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_nodals", xlog=True, c=color)
+                    # RootCyNAPSFigures.Fig_1_c_dependancies(per_root_type_ds, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}", xlog=False)
+
+                    # RootCyNAPSFigures.Fig_1_c(lateral_dataset, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_laterals", xlog=True, c=color)
+                    # RootCyNAPSFigures.Fig_1_c(seminal_dataset, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_seminals", xlog=True, c=color)
+                    # RootCyNAPSFigures.Fig_1_c(nodal_dataset, raw_dirpath, name_suffix=f"_{scenario_times[scenario]}_nodals", xlog=True, c=color)
+
+                    plt.close()
+
+                    
 
                 # Fig 2 related
-                running = False
+                running = True
 
                 if running:
                     all_axes = [axis_id for axis_id in scenario_dataset["axis_index"].values.flatten() if isinstance(axis_id, str)]
@@ -299,7 +354,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
                     nodal_id = [axis_id for axis_id in unique if axis_id.startswith("adventitious")]
                     laterals_id = [axis_id for axis_id in unique if axis_id.startswith("lateral")]
                     
-                    final_dataset = filter_dataset(scenario_dataset, time=scenario_times[scenario])[["distance_from_tip", "root_order", "axis_index", "label", "living_struct_mass", "length", "Lengthy mineral N uptake", "Massic_mineral_N_uptake", "hexose_consumption_by_growth", "C_hexose_root", "Net_mineral_N_uptake"]]
+                    final_dataset = filter_dataset(scenario_dataset, time=scenario_times[scenario])[["distance_from_tip", "root_order", "axis_index", "label", "living_struct_mass", "length", "Lengthy mineral N uptake", "Massic_mineral_N_uptake", "Net_mineral_N_export", "hexose_consumption_by_growth", "C_hexose_root", "Net_mineral_N_uptake"]]
 
                     seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
                     nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
@@ -307,7 +362,81 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
 
                     plotted_datasets = dict(seminals=seminal_dataset, nodals=nodal_dataset, laterals=lateral_dataset)
 
-                    RootCyNAPSFigures.Fig_2_one_prop(final_dataset, plotted_datasets, raw_dirpath, distance_bins, flow="Net_mineral_N_uptake", normalization_property="length", shown_xrange=0.15)
+                    # RootCyNAPSFigures.Fig_2_one_prop(final_dataset, plotted_datasets, raw_dirpath, distance_bins, flow="Net_mineral_N_uptake", normalization_property="length", shown_xrange=0.15)
+                    RootCyNAPSFigures.Fig_2_one_prop(final_dataset, plotted_datasets, distance_bins, flow="Net_mineral_N_export", normalization_property="length", outputs_dirpath=raw_dirpath, shown_xrange=0.6)
+
+                    plt.close()
+
+                # Test thresholding related
+                running = True
+
+                if running:
+                    y = "Net_mineral_N_uptake"
+
+                    all_axes = [axis_id for axis_id in scenario_dataset["axis_index"].values.flatten() if isinstance(axis_id, str)]
+                    unique = np.unique(all_axes)
+
+                    seminal_id = [axis_id for axis_id in unique if axis_id.startswith("seminal")]
+                    nodal_id = [axis_id for axis_id in unique if axis_id.startswith("adventitious")]
+                    laterals_id = [axis_id for axis_id in unique if axis_id.startswith("lateral")]
+
+                    final_dataset = scenario_dataset.sel(t=scenario_times[scenario])[["length", "struct_mass",  "axis_index", y]]
+
+                    seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
+                    nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
+                    lateral_dataset = final_dataset.where(final_dataset["axis_index"].isin(laterals_id), drop=True)
+
+                    per_root_type_ds = dict(seminal=seminal_dataset, nodal=nodal_dataset, lateral=lateral_dataset)
+
+                    axis_type_total_length = {}
+                    axis_active_lentgh = {}
+                    axis_type_total_flow = {}
+                    axis_active_flow = {}
+
+                    for k, d in per_root_type_ds.items():
+                        class_axes = [axis_id for axis_id in d["axis_index"].values.flatten() if isinstance(axis_id, str)]
+                        axis_type_total_length[k] = []
+                        axis_active_lentgh[k] = []
+                        axis_type_total_flow[k] = []
+                        axis_active_flow[k] = []
+                        unique = np.unique(class_axes)
+                        for axis_index in unique:
+                            sub_d = d.where(d["axis_index"]==axis_index, drop=True)
+                            axis_total_length=float(sub_d["length"].sum())
+                            axis_total_flow=float(sub_d[y].sum())
+                            massic_flow = sub_d[y] / sub_d["struct_mass"]
+                            thirdq = np.percentile(massic_flow.values, 90)
+                            active_length = float(sub_d.where(massic_flow >= thirdq, drop=True)["length"].sum())
+                            active_flow = float(sub_d.where(massic_flow >= thirdq, drop=True)[y].sum())
+
+                            axis_type_total_length[k].append(axis_total_length)
+                            axis_active_lentgh[k].append(active_length)
+                            axis_type_total_flow[k].append(axis_total_flow)
+                            axis_active_flow[k].append(active_flow)
+
+                    # print(axis_type_total_length, axis_active_lentgh)
+
+                    overall_lentgh = 0
+                    overall_active_length = 0
+                    overall_flux = 0
+                    overall_active_flux = 0
+                    for k, _ in per_root_type_ds.items():
+                        total_length = sum(axis_type_total_length[k])
+                        active_length = sum(axis_active_lentgh[k])
+                        total_flow = sum(axis_type_total_flow[k])
+                        active_flow = sum(axis_active_flow[k])
+                        print(k, active_length / total_length, active_flow / total_flow)
+                        overall_lentgh += total_length
+                        overall_active_length += active_length
+                        overall_flux  += total_flow
+                        overall_active_flux += active_flow
+
+                    print("overall", overall_active_length / overall_lentgh, overall_active_flux / overall_flux)
+
+                    
+
+
+
                 # print(scenario_dataset.where(scenario_dataset.distance_from_tip < 0.01, drop=True).where(scenario_dataset.z1 < -0.10, drop=True))
                 # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=True, target_vid=122)
                 # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=True, target_vid=100)
@@ -353,7 +482,9 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
         del dataset
         import gc
         gc.collect()
-        RootCyNAPSFigures.Fig_3_lists_embedding_2(dataset=subdataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_mineral_N_uptake", name_suffix="_high")
+
+        RootCyNAPSFigures.Fig_4_v0(dataset=subdataset, scenarios=scenarios, scenario_times=manual_scenario_times, scenario_concentrations=scenario_concentrations, outputs_dirpath=outputs_dirpath, flow='Net_mineral_N_uptake', name_suffix="_test1")
+        # RootCyNAPSFigures.Fig_3_lists_embedding_2(dataset=subdataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_mineral_N_uptake", name_suffix="_high")
         # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_AA_Exudation") 
         # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_AA_Exudation") 
         # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="radial_import_water", shown_xrange=0.6)
@@ -1760,7 +1891,7 @@ def filter_dataset(d, scenario=None, time=None, tmin=None, tmax=None, vids=[], o
     return d
 
 
-def open_and_merge_datasets(scenarios, root_outputs_path = "outputs"):
+def open_and_merge_datasets(scenarios, root_outputs_path = "outputs", use_dask=True):
     print("         [INFO] Openning xarrays...")
 
     default_path_in_outputs = "MTG_properties/MTG_properties_raw/merged.nc"
@@ -1772,17 +1903,17 @@ def open_and_merge_datasets(scenarios, root_outputs_path = "outputs"):
         print("         [INFO] Finished")
         return dataset
     else:
-        inidvidual_datasets = [xr.open_dataset(fp) for fp in per_scenario_files]
+        inidvidual_datasets = [xr.open_dataset(fp, chunks={} if use_dask else None) for fp in per_scenario_files]
         datasets_with_new_dim = []
         for i, ds in enumerate(inidvidual_datasets):
             ds_expanded = ds.expand_dims("scenario")
             ds_expanded["scenario"] = [scenarios[i]]
             datasets_with_new_dim.append(ds_expanded)
 
-        # Step 3: Combine the datasets along the new dimension
-        merged_dataset = xr.concat(datasets_with_new_dim, dim="scenario", join="outer")
-        print("         [INFO] Finished")
-        return merged_dataset
+            # Step 3: Combine the datasets along the new dimension
+            merged_dataset = xr.concat(datasets_with_new_dim, dim="scenario", join="outer")
+            print("         [INFO] Finished")
+            return merged_dataset
 
 
 def pipeline_z_bins_plots(dataset, output_path):
@@ -2543,19 +2674,56 @@ class RootCyNAPSFigures:
 
     def Fig_1_c(scenario_datasets, outputs_path, name_suffix="", xlog = False, c=None, discrete=False):
         massic = True
-        xlim = [1e-5, 1]
-        ylim = [0, 2.1e-8]
+        scatter = True
+        
+        max_lenght = 0.15
+        xlim = [1e-5, max_lenght] if xlog else [-1e-2, max_lenght]
+        # xlim = [0, 60 * 24 * 3600] # If according to age
+    
+        # ylim = [0, 1.5e-8]
+        ylim = None
 
         if not massic:
-            fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lengthy mineral N uptake", c=c, 
-                                            discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
+            if scatter:
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lengthy mineral N uptake", c=c, 
+                                                discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
+            else:
+                fig, ax = XarrayPlotting.line_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lengthy mineral N uptake", c=c, 
+                                                discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
+            
+            
         else:
-            fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Massic_mineral_N_uptake", c=c, 
-                                            discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
+            if scatter:
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Massic_mineral_N_uptake", c=c, 
+                                                discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim, percentile=75)
+            else:
+                fig, ax = XarrayPlotting.line_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Massic_mineral_N_uptake", c=c, 
+                                                discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
+                fig, ax = XarrayPlotting.line_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Massic_import_Nm", c=c, 
+                                                discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
+                fig, ax = XarrayPlotting.line_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Massic_mycorrhizal_mediated_import_Nm", c=c, 
+                                                discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
+                fig, ax = XarrayPlotting.line_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Massic_apoplastic_Nm_soil_xylem", c=c, 
+                                                discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
+                fig, ax = XarrayPlotting.line_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="thermal_time_since_cells_formation", y="Massic_mineral_N_uptake", c=c, 
+                                                discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=ylim)
+                # Not used anywhere else
+                plt.close()
             
         return fig, ax
+    
+    def Fig_1_c_dependancies(scenario_datasets, outputs_path, name_suffix="", xlog = False):
+        properties = ["C_hexose_root", "Massic_root_exchange_surface", "Nm", "Massic_radial_import_water", "Massic_export_xylem", "axial_export_water_up"]
+        show_line = [False, False, False, False, True, False]
+        for i, prop in enumerate(properties):
+            fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x=prop, y="Massic_mineral_N_uptake", c=None, 
+                                                discrete=True, s=1, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None, show_yequalx=show_line[i])
+            fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x=prop, y="Massic_mineral_N_uptake", c="axial_export_water_up", 
+                                                discrete=False, s=1, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None, show_yequalx=show_line[i])
+    
+            
 
-    def Fig_1_d(dataset, comparisions_instructions, outputs_dirpath, suffix_name):
+    def Fig_1_d(dataset, comparisions_instructions, outputs_dirpath, suffix_name, root_system_mean=True):
 
         fig, axes = plt.subplots(ncols=len(comparisions_instructions), figsize=(10, 4))
 
@@ -2568,6 +2736,10 @@ class RootCyNAPSFigures:
 
         if not isinstance(axes, np.ndarray):
             axes = [axes]
+
+        def plot_stat_points(ax, x_pos, stat_yvals, color='black', marker='o', size=30):
+            x_arr = np.full_like(stat_yvals, x_pos, dtype=float)
+            ax.scatter(x_arr, stat_yvals, c=color, s=size, marker=marker, zorder=3)
 
         k = 0
         for variable, test in comparisions_instructions.items():
@@ -2583,14 +2755,57 @@ class RootCyNAPSFigures:
 
             shown_name = variable 
 
+            # Plot points instead of bars
+
+
             if "normalize_by" in test:
                 normalized_name = variable + "_normalized"
                 dataset[normalized_name] = Indicators.compute(d=dataset, formula=f"{variable} / {test['normalize_by']}")
+                if root_system_mean:
+                    property_sum = float(dataset[variable].sum())
+                    normalization_sum = float(dataset[test['normalize_by']].sum())
+                    prop_mean = property_sum / normalization_sum
+
                 variable = normalized_name
+
+            else:
+                if root_system_mean:
+                    prop_mean = float(dataset[variable].mean())
             
             model_violin = ax.violinplot([dataset[variable].values], 
-                    showmeans=False,
-                    showmedians=True)
+                    showmeans=True if not root_system_mean else False,
+                    showmedians=False,
+                    showextrema=False,
+                    quantiles=[0.25, 0.75])
+            
+            if root_system_mean:
+                plot_stat_points(ax, 1, [prop_mean], color='black', marker='_', size=75)
+            
+            # ONLY IF EXTREMA ARE SHOWN : Remove the vertical bar connecting stats
+            for key in ['cbars', 'cmedians', 'cmins', 'cmaxes', 'cquantiles']:
+                if key in model_violin:
+                    model_violin[key].set_visible(False)
+
+            # Plot all stats as points
+            for i, body in enumerate(model_violin['bodies']):
+                verts = body.get_paths()[0].vertices
+                x_pos = np.mean(verts[:, 0])  # center of violin
+
+                # Quantiles: possibly multiple per violin
+                quantile_segments = model_violin['cquantiles'].get_segments()
+                n_violins = len(model_violin['bodies'])
+                qlines_per_violin = len(quantile_segments) // n_violins
+                q_start = i * qlines_per_violin
+                quantile_ys = [quantile_segments[j][0, 1] for j in range(q_start, q_start + qlines_per_violin)]
+                # Extract y positions from existing stats
+                if 'cmedians' in model_violin:
+                    median_y = model_violin['cmedians'].get_segments()[i][0, 1]
+                    # min_y    = model_violin['cmins'].get_segments()[i][0, 1]
+                    # max_y    = model_violin['cmaxes'].get_segments()[i][0, 1]
+                    # Plot all as points
+                    plot_stat_points(ax, x_pos, [median_y], color='black', marker='_', size=75)
+                    # plot_stat_points(ax, x_pos, [min_y, max_y], color='gray', marker='x')
+                    plot_stat_points(ax, x_pos, quantile_ys, color='dimgrey', marker='_', size=75)
 
             # Set color manually
             for body in model_violin['bodies']:
@@ -2735,7 +2950,7 @@ class RootCyNAPSFigures:
         return distance_at_threshold, normalization_property_at_threshold
 
     
-    def Fig_2_one_prop(dataset, datasets, distance_bins, flow, normalization_property, outputs_dirpath=None, name_suffix="", shown_xrange=0.15):
+    def Fig_2_one_prop(dataset, datasets, distance_bins, flow, normalization_property, outputs_dirpath=None, name_suffix="", shown_xrange=0.15, different_total=None):
         
         print(dataset["living_struct_mass"].sum().values)
 
@@ -3100,6 +3315,122 @@ class RootCyNAPSFigures:
         fig.subplots_adjust(hspace=0.3) 
         fig.savefig(os.path.join(outputs_dirpath, f"final_graph_{flow}{name_suffix}" + ".png"), dpi=720, bbox_inches="tight")
 
+    
+    def Fig_4_v0(dataset, scenarios, scenario_times, scenario_concentrations, outputs_dirpath, flow, shown_xrange=0.15, name_suffix=""):
+        
+        parallel = True
+        
+        unique_times = np.unique(sorted(list(scenario_times.values())))
+        unique_concentrations = np.unique(sorted(list(scenario_concentrations.values())))
+
+        if parallel:
+            processes = []
+            max_processes = int(mp.cpu_count() / 2)
+            with mp.Manager() as manager:
+                results = manager.dict()
+
+                for scenario in scenarios:
+                    scenario_time = scenario_times[scenario]
+                    scenario_concentration = scenario_concentrations[scenario]
+                    print(f"[INFO] Processing scenario {scenario}")
+                    while len(processes) == max_processes and has_enough_memory(memory_requiered_slice(scenario_time)):
+                        processes = [p for p in processes if p.is_alive()]
+                        time.sleep(1)
+                    
+                    p = mp.Process(target=RootCyNAPSFigures.worker_Fig4, kwargs=dict(dataset=dataset, scenario=scenario, scenario_time=scenario_time,
+                                                                                     scenario_concentration=scenario_concentration, flow=flow, shared_dict=results))
+                    p.start()
+                    processes.append(p)
+
+                for p in processes:
+                    p.join()
+
+                # Unpacking results
+                result_matrix = {}
+                for root_type_filter in ("total", "seminals", "nodals", "laterals"):
+                    local_matrix = np.zeros(shape=(len(unique_concentrations), len(unique_times)))
+                    for scenario, local_result in results.items():
+                        x_indice = list(unique_times).index(scenario_times[scenario])
+                        y_indice = list(unique_concentrations).index(scenario_concentrations[scenario])
+                        local_matrix[y_indice][x_indice] = local_result[root_type_filter]['proportion']
+
+                    result_matrix[root_type_filter] = local_matrix
+        
+        else:
+            results = {}
+            for scenario in scenarios:
+                print(f"[INFO] Processing scenario {scenario}")
+                scenario_time = scenario_times[scenario]
+                scenario_concentration = scenario_concentrations[scenario]
+                local_result = RootCyNAPSFigures.worker_Fig4(dataset=dataset, scenario=scenario, scenario_time=scenario_time,
+                                                            scenario_concentration=scenario_concentration, flow=flow)
+                if scenario_time not in results:
+                    results[scenario_time] = {}
+                results[scenario_time][scenario_concentration] = local_result
+
+            result_matrix, x_time, y_concentration = {}, {}, {}
+            for root_type_filter in ("total", "seminals", "nodals", "laterals"):
+                result_matrix[root_type_filter] = np.array([[concentration_slice[root_type_filter]["proportion"] for concentration_slice in time_slice] for time_slice in results.values()])
+                x_time[root_type_filter] = np.array(scenario_times.values())
+                y_concentration[root_type_filter] = np.array(scenario_concentrations.values())
+
+        for root_type_filter in ("total", "seminals", "nodals", "laterals"):
+            fig, ax = plt.subplots()
+
+            im, cbar = XarrayPlotting.heatmap(result_matrix[root_type_filter], unique_concentrations, unique_times, ax=ax,
+                    cmap="YlGn", cbarlabel="% of N uptaken by 10% most active root_length", cbar_kw=dict(format=FuncFormatter(lambda x, _: f"{x * 100:.0f}")))
+            texts = XarrayPlotting.annotate_heatmap(im, valfmt="{x:.0%}")
+
+            fig.suptitle(f"{root_type_filter}")
+
+            ax.set_xlabel("Root system age (days)")
+            ax.set_ylabel(f"NO3- concentration outside roots (mM)")
+
+            fig.savefig(os.path.join(outputs_dirpath, f"10%_contribution_{flow}_{root_type_filter}{name_suffix}" + ".png"), dpi=720, bbox_inches="tight")
+
+
+    def worker_Fig4(dataset, scenario, scenario_time, scenario_concentration, flow, shared_dict=None):
+        scenario_dataset = filter_dataset(dataset, scenario=scenario)
+
+        all_axes = [axis_id for axis_id in scenario_dataset["axis_index"].values.flatten() if isinstance(axis_id, str)]
+        unique = np.unique(all_axes)
+
+        seminal_id = [axis_id for axis_id in unique if axis_id.startswith("seminal")]
+        nodal_id = [axis_id for axis_id in unique if axis_id.startswith("adventitious")]
+        laterals_id = [axis_id for axis_id in unique if axis_id.startswith("lateral")]
+        
+        final_dataset = filter_dataset(scenario_dataset, time=((scenario_time + 1)  * 24)) #TODO tooooo specific here
+
+        seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
+        nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
+        lateral_dataset = final_dataset.where(final_dataset["axis_index"].isin(laterals_id), drop=True)
+
+        plotted_datasets = dict(total=final_dataset, seminals=seminal_dataset, nodals=nodal_dataset, laterals=lateral_dataset)
+        grouped_geometry = "length"
+        normalization_property = "struct_mass"
+        proportion_of_geometry = 0.1
+
+        local_result = {}
+        for name, d in plotted_datasets.items():
+            d[flow] = d[flow].where(d[flow] > 0, other=0.)
+            total_geometry = d[grouped_geometry].sum()
+            total_flow = d[flow].sum()
+            d[f"{flow}_per_{normalization_property}"] = Indicators.compute(d, formula=f"{flow} / {normalization_property}")
+
+            cumsummed_dataset = d.sortby(f"{flow}_per_{normalization_property}", ascending = False)
+
+            cumsummed_dataset[grouped_geometry] = (cumsummed_dataset[grouped_geometry] / total_geometry).cumsum(dim="vid")
+
+            cropped_dataset = cumsummed_dataset.where(cumsummed_dataset[grouped_geometry] <= proportion_of_geometry, drop=True)
+            
+            group_contribution = cropped_dataset[flow].sum(dim="vid")
+
+            local_result[name] = dict(proportion=float((group_contribution / total_flow).values), top_flow=float(group_contribution.values))
+
+        if shared_dict is not None:
+            shared_dict[scenario] = local_result
+        else:
+            return local_result
 
     def embedded_Fig2(dataset, scenario, scenario_times, distance_bins, flow, shown_xrange, shared_dict=None):
 
@@ -3113,6 +3444,7 @@ class RootCyNAPSFigures:
         laterals_id = [axis_id for axis_id in unique if axis_id.startswith("lateral")]
         
         final_dataset = filter_dataset(scenario_dataset, time=scenario_times[scenario])
+        print(final_dataset[flow])
 
         seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
         nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
@@ -3227,7 +3559,7 @@ class Indicators:
 class XarrayPlotting:
 
     def scatter_xarray(dataset, outputs_dirpath, x: str, y: str, c: str=None, discrete: bool=False, s: int=None, name_suffix: str="", 
-                       xlog: bool=False, ylog: bool=False, xlim=None, ylim=None):
+                       xlog: bool=False, ylog: bool=False, xlim=None, ylim=None, show_yequalx=False, percentile=None):
         
         fig, ax = plt.subplots()
 
@@ -3240,7 +3572,9 @@ class XarrayPlotting:
         ax.ticklabel_format(axis='y', style='sci', scilimits=(-3, 3))
         ax.yaxis.offsetText.set_visible(True)
 
-        bounds = dict(vmin=1e-5, vmax=1e-3)
+        # bounds = dict(vmin=1e-5, vmax=1e-3)
+        bounds = dict(vmin=None, vmax=None)
+
         norm=LogNorm(**bounds)
         
         if xlog:
@@ -3272,6 +3606,19 @@ class XarrayPlotting:
                 ct += 1
             else:
                 plotted = ax.scatter(d[x].values, d[y].values, c=d[c].values, cmap='rainbow', norm=norm, s=s)
+            
+            if percentile is not None:
+                Q1, Q3 = np.percentile(d[y].values, [25, 75])
+                IQR = Q3 - Q1
+
+                median_flux = np.median(d[y].values)
+                mad_flux = np.median(np.abs(d[y].values - median_flux))
+
+                # threshold: median + (k × MAD), typical k = 3-5
+                threshold = median_flux + 3 * mad_flux
+                # threshold = np.percentile(d[y].values, percentile)
+                # threshold= Q3 + 1.5 * IQR
+                ax.plot([0, 0.15], [threshold, threshold], c=list(colorblind_palette.values())[ct])
         
         ax.set_xlabel(f"{x.replace('_', ' ')} ({x_unit})")
         ax.set_ylabel(f"{y.replace('_', ' ')} ({y_unit})")
@@ -3282,16 +3629,30 @@ class XarrayPlotting:
                 shown_name = "adim"
 
             cbar = fig.colorbar(plotted, ax=ax, label=f"{c.replace('_', ' ')} ({shown_name})")
-            
+        
 
         if discrete:
-                ax.legend(markerscale=2.5)
+            ax.legend(markerscale=2.5)
 
         if xlim:
             ax.set_xlim(xlim)
 
         if ylim:
             ax.set_ylim(ylim)
+
+        if show_yequalx:
+            # Get the current limits
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+
+            # Compute the segment of y = x that is visible in the current axes
+            x_start = max(xlim[0], ylim[0])
+            x_end = min(xlim[1], ylim[1])
+            x_vals = [x_start, x_end]
+            y_vals = [x_start, x_end]  # because y = x
+
+            # Plot the line
+            ax.plot(x_vals, y_vals, linestyle='--', color='gray', label='y = x')
 
         filename = f"Scatter_{y}_vs_{x}_colored_by_{c}{name_suffix}.png"
 
@@ -3300,53 +3661,207 @@ class XarrayPlotting:
         return fig, ax
 
     
-    def line_xarray(dataset, outputs_dirpath, x: str, y: str, c: str=None, discrete: bool=False, s: int=None, name_suffix: str=""):
+    def line_xarray(dataset, outputs_dirpath, x: str, y: str, c: str=None, discrete: bool=False, s: int=None, name_suffix: str="", 
+                    xlog: bool=False, ylog: bool=False, xlim=None, ylim=None):
         fig, ax = plt.subplots()
-        ax.xaxis.set_major_formatter(FuncFormatter(scientific_formatter))
-        ax.yaxis.set_major_formatter(FuncFormatter(scientific_formatter))
+
+        formatter = ScalarFormatter(useMathText=True)
+        formatter.set_scientific(True)
+        formatter.set_powerlimits((-3, 3)) 
+
+        ax.xaxis.set_major_formatter(formatter)
+        ax.yaxis.set_major_formatter(formatter)
+        ax.ticklabel_format(axis='y', style='sci', scilimits=(-3, 3))
+        ax.yaxis.offsetText.set_visible(True)
+
+        bounds = dict(vmin=1e-5, vmax=1e-3)
+        norm=LogNorm(**bounds)
 
         if not isinstance(dataset, dict):
+            x_unit = unit_from_str(dataset[x].unit)
+            y_unit = unit_from_str(dataset[y].unit)
+
+            if c:
+                c_unit = unit_from_str(dataset[c].unit)
+
             dataset = {"single_dataset": dataset}
 
-            x_unit = ureg(dataset[x].unit.replace("-", "^-"))
-            x_unit = latex_unit_compact(x_unit)
-            y_unit = ureg(dataset[y].unit.replace("-", "^-"))
-            if c:
-                c_unit = ureg(dataset[c].unit.replace("-", "^-"))
         else:
             first = list(dataset.values())[0]
-            x_unit = ureg(first[x].unit.replace("-", "^-"))
-            y_unit = ureg(first[y].unit.replace("-", "^-"))
+            x_unit = unit_from_str(first[x].unit)
+            y_unit = unit_from_str(first[y].unit)
             if c:
-                c_unit = ureg(first[c].unit.replace("-", "^-"))
+                c_unit = unit_from_str(first[c].unit)
 
-        ct = 0
+        ct = 0  
         for name, d in dataset.items():
-            if discrete:
-                plotted = ax.plot(d[x].values, d[y].values, c=list(colorblind_palette.values())[ct], s=s, label=name)
-                ct += 1
-            else:
-                plotted = ax.plot(d[x].values, d[y].values, c=d[c].values, s=s)
-        
-        ax.set_xlabel(f"{x.replace('_', ' ')} ({x_unit.units:~P})")
-        ax.set_ylabel(f"{y.replace('_', ' ')} ({y_unit.units:~P})")
+            first_label = True
+            class_axes = [axis_id for axis_id in d["axis_index"].values.flatten() if isinstance(axis_id, str)]
+            unique = np.unique(class_axes)
+            for axis_index in unique:
+                sub_d = d.where(d["axis_index"]==axis_index, drop=True)
+                if len(list(sub_d[x].values.flatten())) > 1:
+                    if discrete:
+                        if first_label:
+                            plotted = ax.plot(sub_d[x].values, sub_d[y].values, marker=None, c=list(colorblind_palette.values())[ct+1], label=name, linewidth=0.1, markersize=s)
+                            first_label = False
+                        else:
+                            plotted = ax.plot(sub_d[x].values, sub_d[y].values, marker=None, c=list(colorblind_palette.values())[ct+1], linewidth=0.1, markersize=s)
+                    else:
+                        plotted = ax.plot(sub_d[x].values, sub_d[y].values, marker=None, c=sub_d[c].values, cmap='rainbow', norm=norm, linewidth=2, markersize=s)
+                else:
+                    if discrete:
+                        plotted = ax.scatter(sub_d[x].values, sub_d[y].values, marker='.', c=list(colorblind_palette.values())[ct+1], s = s/10)
+                    else:
+                        plotted = ax.scatter(sub_d[x].values, sub_d[y].values, marker='.', c=sub_d[c].values, cmap='rainbow', norm=norm, s = s/10)
 
-        if c:
-            shown_name = f"{c_unit.units:~P}"
+            ct += 1
+        
+        ax.set_xlabel(f"{x.replace('_', ' ')} ({x_unit})")
+        ax.set_ylabel(f"{y.replace('_', ' ')} ({y_unit})")
+
+        if c and not discrete:
+            shown_name = f"{c_unit}"
             if shown_name == "":
                 shown_name = "adim"
 
-            if discrete:
-                ax.legend()
-            else:
-                fig.colorbar(plotted, ax=ax, label=f"{c.replace('_', ' ')} ({shown_name})")
+            cbar = fig.colorbar(plotted, ax=ax, label=f"{c.replace('_', ' ')} ({shown_name})")
 
-        filename = f"Scatter_{y}_vs_{x}_colored_by_{c}{name_suffix}.png"
+        if discrete:
+            leg = ax.legend()
+            # set the linewidth of each legend object
+            for legobj in leg.legendHandles:
+                legobj.set_linewidth(2.0)
+
+        if xlim:
+            ax.set_xlim(xlim)
+
+        if ylim:
+            ax.set_ylim(ylim)
+
+        filename = f"Scatter_{y}_vs_{x}_colored_by_{c}{name_suffix}_line.png"
 
         fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
 
-        plt.close()
+        return fig, ax
+    
 
+    def heatmap(data, row_labels, col_labels, ax=None,
+            cbar_kw=None, cbarlabel="", **kwargs):
+        """
+        Create a heatmap from a numpy array and two lists of labels.
+
+        Parameters
+        ----------
+        data
+            A 2D numpy array of shape (M, N).
+        row_labels
+            A list or array of length M with the labels for the rows.
+        col_labels
+            A list or array of length N with the labels for the columns.
+        ax
+            A `matplotlib.axes.Axes` instance to which the heatmap is plotted.  If
+            not provided, use current Axes or create a new one.  Optional.
+        cbar_kw
+            A dictionary with arguments to `matplotlib.Figure.colorbar`.  Optional.
+        cbarlabel
+            The label for the colorbar.  Optional.
+        **kwargs
+            All other arguments are forwarded to `imshow`.
+        """
+
+        if ax is None:
+            ax = plt.gca()
+
+        if cbar_kw is None:
+            cbar_kw = {}
+
+        # Plot the heatmap
+        im = ax.imshow(data, **kwargs)
+
+        # Create colorbar
+        cbar = ax.figure.colorbar(im, ax=ax, **cbar_kw)
+        cbar.ax.set_ylabel(cbarlabel, rotation=-90, va="bottom")
+
+        # Show all ticks and label them with the respective list entries.
+        # Let the horizontal axes labeling appear on bottom.
+        ax.set_xticks(range(data.shape[1]), labels=col_labels)
+        
+        ax.set_yticks(range(data.shape[0]), labels=row_labels)
+
+        # Let the horizontal axes labeling appear on top.
+        ax.tick_params(top=True, bottom=False,
+                    labeltop=True, labelbottom=False)
+
+        # Turn spines off and create white grid.
+        ax.spines[:].set_visible(False)
+
+        ax.set_xticks(np.arange(data.shape[1]+1)-.5, minor=True)
+        ax.set_yticks(np.arange(data.shape[0]+1)-.5, minor=True)
+        ax.grid(which="minor", color="w", linestyle='-', linewidth=3)
+        # ax.tick_params(which="minor", bottom=False, left=False)
+        ax.tick_params(top=False, bottom=True, labeltop=False, labelbottom=True)
+
+        return im, cbar
+
+
+    def annotate_heatmap(im, data=None, valfmt="{x:.2f}",
+                        textcolors=("black", "white"),
+                        threshold=None, **textkw):
+        """
+        A function to annotate a heatmap.
+
+        Parameters
+        ----------
+        im
+            The AxesImage to be labeled.
+        data
+            Data used to annotate.  If None, the image's data is used.  Optional.
+        valfmt
+            The format of the annotations inside the heatmap.  This should either
+            use the string format method, e.g. "$ {x:.2f}", or be a
+            `matplotlib.ticker.Formatter`.  Optional.
+        textcolors
+            A pair of colors.  The first is used for values below a threshold,
+            the second for those above.  Optional.
+        threshold
+            Value in data units according to which the colors from textcolors are
+            applied.  If None (the default) uses the middle of the colormap as
+            separation.  Optional.
+        **kwargs
+            All other arguments are forwarded to each call to `text` used to create
+            the text labels.
+        """
+
+        if not isinstance(data, (list, np.ndarray)):
+            data = im.get_array()
+
+        # Normalize the threshold to the images color range.
+        if threshold is not None:
+            threshold = im.norm(threshold)
+        else:
+            threshold = im.norm(data.max())/2.
+
+        # Set default alignment to center, but allow it to be
+        # overwritten by textkw.
+        kw = dict(horizontalalignment="center",
+                verticalalignment="center")
+        kw.update(textkw)
+
+        # Get the formatter in case a string is supplied
+        if isinstance(valfmt, str):
+            valfmt = StrMethodFormatter(valfmt)
+
+        # Loop over the data and create a `Text` for each "pixel".
+        # Change the text's color depending on the data.
+        texts = []
+        for i in range(data.shape[0]):
+            for j in range(data.shape[1]):
+                kw.update(color=textcolors[int(im.norm(data[i, j]) > threshold)])
+                text = im.axes.text(j, i, valfmt(data[i, j], None), **kw)
+                texts.append(text)
+
+        return texts
 
 
 
