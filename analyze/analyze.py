@@ -22,12 +22,14 @@ pd.set_option("display.width", 0)  # Adjusts to screen width
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, FFMpegWriter
-from matplotlib.ticker import FuncFormatter, LogFormatterSciNotation, ScalarFormatter, StrMethodFormatter
+from matplotlib.ticker import FuncFormatter, LogFormatterSciNotation, ScalarFormatter, StrMethodFormatter, LogLocator, LogFormatter
 from matplotlib.colors import LogNorm
 import matplotlib.patches as mpatches
 from mpl_toolkits.mplot3d import Axes3D
 
 import xarray as xr
+from dask import delayed, compute
+
 from pint import UnitRegistry
 from pint.formatting import format_unit
 import re
@@ -188,30 +190,19 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
             fig, _ = plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/MTG_properties_summed"),
                   csv_name="plant_scale_properties.csv", properties=["diffusion_AA_soil", "export_AA", "amino_acids_consumption_by_growth", "AA_catabolism", "deficit_AA"], stacked=True, custom_suffix="_AA_outputs")
             print("     [INFO] Finished 2d plots")
+
     if on_raw_logs:
         print("     [INFO] Starting deep learning analysis on raw logs...")
         from analyze.workflow.STM_analysis.main_workflow import run_analysis
         from analyze.workflow.global_sensivity.run_global_sensitivity import regression_analysis
         xarray_deep_learning()
         print("     [INFO] Finished DL")
+
     if animate_raw_logs:
         print("     [INFO] Starting plot production from raw logs...")
-
-        unique_times = sorted([10, 20, 30, 40, 50, 60])
-        # scenario_concentrations = [0.1,	0.01, 0.05, 0.5, 5,	50]
-        unique_concentrations = sorted([0.01, 0.05, 0.5, 5, 50])
-        manual_scenario_times = {}
-        scenario_concentrations = {}
-        scenarios = []
-        for concentration in unique_concentrations:
-            for time in unique_times:
-                scenario = f"RC_ref_{concentration}_{time}D"
-                scenarios.append(scenario)
-                manual_scenario_times[scenario] = time
-                scenario_concentrations[scenario] = concentration
         
         fps=5
-        dataset = open_and_merge_datasets(scenarios=scenarios, root_outputs_path=outputs_dirpath)
+        dataset = open_and_merge_datasets(scenarios=scenarios, root_outputs_path=outputs_dirpath, use_dask=False)
         #dataset["NAE"] = Indicators.Nitrogen_Aquisition_Efficiency(d=dataset)
         #dataset["Cumulative_NAE"] = Indicators.Cumulative_Nitrogen_Aquisition_Efficiency(d=dataset)
         #dataset["Cumulative_Nitrogen_Uptake"] = Indicators.Cumulative_Nitrogen_Uptake(d=dataset)
@@ -363,7 +354,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
                     plotted_datasets = dict(seminals=seminal_dataset, nodals=nodal_dataset, laterals=lateral_dataset)
 
                     # RootCyNAPSFigures.Fig_2_one_prop(final_dataset, plotted_datasets, raw_dirpath, distance_bins, flow="Net_mineral_N_uptake", normalization_property="length", shown_xrange=0.15)
-                    RootCyNAPSFigures.Fig_2_one_prop(final_dataset, plotted_datasets, distance_bins, flow="Net_mineral_N_export", normalization_property="length", outputs_dirpath=raw_dirpath, shown_xrange=0.6)
+                    RootCyNAPSFigures.Fig_2_one_prop(final_dataset, plotted_datasets, distance_bins, flow="Net_mineral_N_export", normalization_property="length", outputs_dirpath=raw_dirpath, shown_xrange=0.15)
 
                     plt.close()
 
@@ -477,17 +468,40 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
 
         ### Fig 2 & 3 related
         # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_mineral_N_uptake", name_suffix="_C_per_apex")
-        
-        subdataset = dataset[["distance_from_tip", "root_order", "axis_index", "label", "struct_mass", "length", "hexose_consumption_by_growth", "Net_mineral_N_uptake"]]
-        del dataset
-        import gc
-        gc.collect()
+        autonomous_figures = True
 
-        RootCyNAPSFigures.Fig_4_v0(dataset=subdataset, scenarios=scenarios, scenario_times=manual_scenario_times, scenario_concentrations=scenario_concentrations, outputs_dirpath=outputs_dirpath, flow='Net_mineral_N_uptake', name_suffix="_test1")
-        # RootCyNAPSFigures.Fig_3_lists_embedding_2(dataset=subdataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_mineral_N_uptake", name_suffix="_high")
-        # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_AA_Exudation") 
-        # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_AA_Exudation") 
-        # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="radial_import_water", shown_xrange=0.6)
+        if autonomous_figures:
+            # unique_times = np.arange(10, 61, 5)
+            unique_times = np.arange(10, 61, 1)
+            # unique_concentrations = np.logspace(0, 4, len(unique_times)) * 5e-3
+            unique_concentrations = np.logspace(0, 4, 11) * 5e-3
+
+            manual_scenario_times = {}
+            scenario_concentrations = {}
+            scenarios = []
+            for concentration in unique_concentrations:
+                for time in unique_times:
+                    scenario = f"RC_ref_{concentration:.2e}_{time}D"
+                    scenarios.append(scenario)
+                    manual_scenario_times[scenario] = time
+                    scenario_concentrations[scenario] = concentration
+            
+            dataset = open_and_merge_datasets(scenarios=scenarios, root_outputs_path=outputs_dirpath)
+            dataset["Net_mineral_N_uptake"] = Indicators.compute(d=dataset, formula="import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - apoplastic_Nm_soil_xylem")
+
+            print("Loading subset...")
+            subdataset = dataset[["distance_from_tip", "root_order", "axis_index", "label", "struct_mass", "length", "hexose_consumption_by_growth", "Net_mineral_N_uptake"]].load()
+            print("Loaded")
+
+            # del dataset
+            # import gc
+            # gc.collect()
+
+            RootCyNAPSFigures.Fig_4_v0(dataset=subdataset, scenarios=scenarios, scenario_times=manual_scenario_times, scenario_concentrations=scenario_concentrations, outputs_dirpath=outputs_dirpath, flow='Net_mineral_N_uptake', name_suffix="_length")
+            # RootCyNAPSFigures.Fig_3_lists_embedding_2(dataset=subdataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_mineral_N_uptake", name_suffix="_high")
+            # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_AA_Exudation") 
+            # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_AA_Exudation") 
+            # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="radial_import_water", shown_xrange=0.6)
 
         # Then scenario comparisions
         if subdir_custom_name:
@@ -1910,10 +1924,36 @@ def open_and_merge_datasets(scenarios, root_outputs_path = "outputs", use_dask=T
             ds_expanded["scenario"] = [scenarios[i]]
             datasets_with_new_dim.append(ds_expanded)
 
-            # Step 3: Combine the datasets along the new dimension
-            merged_dataset = xr.concat(datasets_with_new_dim, dim="scenario", join="outer")
-            print("         [INFO] Finished")
-            return merged_dataset
+        # Step 3: Combine the datasets along the new dimension
+        merged_dataset = xr.concat(datasets_with_new_dim, dim="scenario", join="outer")
+        print("         [INFO] Finished")
+        return merged_dataset
+
+
+def open_and_merge_datasets_faster_attempt(scenarios, root_outputs_path = "outputs", use_dask=True):
+    print("         [INFO] Openning xarrays...")
+
+    default_path_in_outputs = "MTG_properties/MTG_properties_raw/merged.nc"
+
+    per_scenario_files = [os.path.join(root_outputs_path, name, default_path_in_outputs) for name in scenarios]
+    
+    if len(per_scenario_files) == 1:
+        dataset = xr.open_dataset(per_scenario_files[0], engine="netcdf4")
+        print("         [INFO] Finished")
+        return dataset
+    else:
+        @delayed
+        def lazy_open(fp, scenario):
+            ds = xr.open_dataset(fp, chunks={})
+            return ds.expand_dims("scenario").assign_coords(scenario=[scenario])
+        
+        lazy_datasets = [lazy_open(fp, sc) for fp, sc in zip(per_scenario_files, scenarios)]
+        datasets_with_new_dim = compute(*lazy_datasets)
+
+        # Step 3: Combine the datasets along the new dimension
+        merged_dataset = xr.concat(datasets_with_new_dim, dim="scenario", join="outer")
+        print("         [INFO] Finished")
+        return merged_dataset
 
 
 def pipeline_z_bins_plots(dataset, output_path):
@@ -2673,7 +2713,7 @@ def inspect_mtg_structure(g):
 class RootCyNAPSFigures:
 
     def Fig_1_c(scenario_datasets, outputs_path, name_suffix="", xlog = False, c=None, discrete=False):
-        massic = True
+        massic = False
         scatter = True
         
         max_lenght = 0.15
@@ -2695,7 +2735,7 @@ class RootCyNAPSFigures:
         else:
             if scatter:
                 fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Massic_mineral_N_uptake", c=c, 
-                                                discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim, percentile=75)
+                                                discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
             else:
                 fig, ax = XarrayPlotting.line_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Massic_mineral_N_uptake", c=c, 
                                                 discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
@@ -3238,8 +3278,7 @@ class RootCyNAPSFigures:
         step = 0.005
         # distance_bins = np.arange(dataset["distance_from_tip"].min(), 
         #                         dataset["distance_from_tip"].max() + step, step)
-        distance_bins = np.arange(0, 
-                                dataset["distance_from_tip"].max() + step, step)
+        distance_bins = np.arange(0, dataset["distance_from_tip"].max() + step, step)
         scenario_times = dict(zip(scenarios, dataset.t.values))
         
 
@@ -3316,12 +3355,14 @@ class RootCyNAPSFigures:
         fig.savefig(os.path.join(outputs_dirpath, f"final_graph_{flow}{name_suffix}" + ".png"), dpi=720, bbox_inches="tight")
 
     
-    def Fig_4_v0(dataset, scenarios, scenario_times, scenario_concentrations, outputs_dirpath, flow, shown_xrange=0.15, name_suffix=""):
-        
+    def Fig_4_v0(dataset, scenarios, scenario_times, scenario_concentrations, outputs_dirpath, flow, name_suffix=""):
         parallel = True
         
-        unique_times = np.unique(sorted(list(scenario_times.values())))
-        unique_concentrations = np.unique(sorted(list(scenario_concentrations.values())))
+        unique_times = np.unique(list(scenario_times.values()))
+        unique_concentrations = np.unique(list(scenario_concentrations.values()))
+
+        unique_times = np.array(sorted(list(unique_times), reverse=False))
+        unique_concentrations = np.array(sorted(list(unique_concentrations), reverse=True))
 
         if parallel:
             processes = []
@@ -3333,8 +3374,12 @@ class RootCyNAPSFigures:
                     scenario_time = scenario_times[scenario]
                     scenario_concentration = scenario_concentrations[scenario]
                     print(f"[INFO] Processing scenario {scenario}")
-                    while len(processes) == max_processes and has_enough_memory(memory_requiered_slice(scenario_time)):
+                    while len(processes) == max_processes or not has_enough_memory(memory_requiered_slice(scenario_time)):
                         processes = [p for p in processes if p.is_alive()]
+                        # if len(processes) == max_processes:
+                        #     print("Waiting, max number of processes reached")
+                        # if not has_enough_memory(memory_requiered_slice(scenario_time)):
+                        #     print("Waiting, not enough memory")
                         time.sleep(1)
                     
                     p = mp.Process(target=RootCyNAPSFigures.worker_Fig4, kwargs=dict(dataset=dataset, scenario=scenario, scenario_time=scenario_time,
@@ -3362,34 +3407,42 @@ class RootCyNAPSFigures:
                 print(f"[INFO] Processing scenario {scenario}")
                 scenario_time = scenario_times[scenario]
                 scenario_concentration = scenario_concentrations[scenario]
-                local_result = RootCyNAPSFigures.worker_Fig4(dataset=dataset, scenario=scenario, scenario_time=scenario_time,
+                results[scenario] = RootCyNAPSFigures.worker_Fig4(dataset=dataset, scenario=scenario, scenario_time=scenario_time,
                                                             scenario_concentration=scenario_concentration, flow=flow)
-                if scenario_time not in results:
-                    results[scenario_time] = {}
-                results[scenario_time][scenario_concentration] = local_result
 
-            result_matrix, x_time, y_concentration = {}, {}, {}
+            # Unpacking results
+            result_matrix = {}
             for root_type_filter in ("total", "seminals", "nodals", "laterals"):
-                result_matrix[root_type_filter] = np.array([[concentration_slice[root_type_filter]["proportion"] for concentration_slice in time_slice] for time_slice in results.values()])
-                x_time[root_type_filter] = np.array(scenario_times.values())
-                y_concentration[root_type_filter] = np.array(scenario_concentrations.values())
+                local_matrix = np.zeros(shape=(len(unique_concentrations), len(unique_times)))
+                for scenario, local_result in results.items():
+                    x_indice = list(unique_times).index(scenario_times[scenario])
+                    y_indice = list(unique_concentrations).index(scenario_concentrations[scenario])
+                    local_matrix[y_indice][x_indice] = local_result[root_type_filter]['proportion']
+
+                result_matrix[root_type_filter] = local_matrix
+
+        # In case it fails
+        # import pickle
+        # with open(os.path.join(outputs_dirpath, 'tp_result_matrix.pckl'), 'wb') as f:
+        #     pickle.dump(result_matrix, f)
 
         for root_type_filter in ("total", "seminals", "nodals", "laterals"):
             fig, ax = plt.subplots()
 
             im, cbar = XarrayPlotting.heatmap(result_matrix[root_type_filter], unique_concentrations, unique_times, ax=ax,
-                    cmap="YlGn", cbarlabel="% of N uptaken by 10% most active root_length", cbar_kw=dict(format=FuncFormatter(lambda x, _: f"{x * 100:.0f}")))
-            texts = XarrayPlotting.annotate_heatmap(im, valfmt="{x:.0%}")
+                    cmap="turbo", cbarlabel="% of N uptaken by 10% most active root length", cbar_kw=dict(format=FuncFormatter(lambda x, _: f"{x * 100:.0f}")), ylog=True)
+            # texts = XarrayPlotting.annotate_heatmap(im, valfmt="{x:.0%}")
 
             fig.suptitle(f"{root_type_filter}")
 
-            ax.set_xlabel("Root system age (days)")
-            ax.set_ylabel(f"NO3- concentration outside roots (mM)")
+            ax.set_xlabel("Root system age (day)")
+            ax.set_ylabel(r"$[\mathrm{NO}_3^-]_{\mathrm{soil}}$ (mM)")
 
             fig.savefig(os.path.join(outputs_dirpath, f"10%_contribution_{flow}_{root_type_filter}{name_suffix}" + ".png"), dpi=720, bbox_inches="tight")
 
 
     def worker_Fig4(dataset, scenario, scenario_time, scenario_concentration, flow, shared_dict=None):
+
         scenario_dataset = filter_dataset(dataset, scenario=scenario)
 
         all_axes = [axis_id for axis_id in scenario_dataset["axis_index"].values.flatten() if isinstance(axis_id, str)]
@@ -3398,31 +3451,40 @@ class RootCyNAPSFigures:
         seminal_id = [axis_id for axis_id in unique if axis_id.startswith("seminal")]
         nodal_id = [axis_id for axis_id in unique if axis_id.startswith("adventitious")]
         laterals_id = [axis_id for axis_id in unique if axis_id.startswith("lateral")]
-        
+
         final_dataset = filter_dataset(scenario_dataset, time=((scenario_time + 1)  * 24)) #TODO tooooo specific here
 
+        # axis_index_dims = final_dataset["axis_index"].dims
         seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
         nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
         lateral_dataset = final_dataset.where(final_dataset["axis_index"].isin(laterals_id), drop=True)
+        # lateral_dataset = final_dataset.where(final_dataset["axis_index"].isin(laterals_id), drop=True) # kept in case
 
         plotted_datasets = dict(total=final_dataset, seminals=seminal_dataset, nodals=nodal_dataset, laterals=lateral_dataset)
         grouped_geometry = "length"
-        normalization_property = "struct_mass"
+        normalization_property = "length"
         proportion_of_geometry = 0.1
 
         local_result = {}
         for name, d in plotted_datasets.items():
+            # We filter only positive values to avoid accounting for non coherent percentage when some regions don't net actively import
             d[flow] = d[flow].where(d[flow] > 0, other=0.)
             total_geometry = d[grouped_geometry].sum()
             total_flow = d[flow].sum()
+
+            # Different from length to enable better classification of most active segments
             d[f"{flow}_per_{normalization_property}"] = Indicators.compute(d, formula=f"{flow} / {normalization_property}")
 
+            # We sort by this efficiency of absorption
             cumsummed_dataset = d.sortby(f"{flow}_per_{normalization_property}", ascending = False)
 
+            # Yields the percentage of length, ordered by massic absorption
             cumsummed_dataset[grouped_geometry] = (cumsummed_dataset[grouped_geometry] / total_geometry).cumsum(dim="vid")
 
+            # We crop to test hypotheses from litterature
             cropped_dataset = cumsummed_dataset.where(cumsummed_dataset[grouped_geometry] <= proportion_of_geometry, drop=True)
             
+            # Then we get the quantity per time unit of this root zone
             group_contribution = cropped_dataset[flow].sum(dim="vid")
 
             local_result[name] = dict(proportion=float((group_contribution / total_flow).values), top_flow=float(group_contribution.values))
@@ -3431,6 +3493,7 @@ class RootCyNAPSFigures:
             shared_dict[scenario] = local_result
         else:
             return local_result
+
 
     def embedded_Fig2(dataset, scenario, scenario_times, distance_bins, flow, shown_xrange, shared_dict=None):
 
@@ -3470,6 +3533,7 @@ class RootCyNAPSFigures:
                 shared_dict[k] += [(scenario_times[scenario], v)]
         else:
             return apex_number, apex_length_density, C_consummed_per_apex, grouping_distance, grouping_length
+
 
 class Indicators:
 
@@ -3559,7 +3623,7 @@ class Indicators:
 class XarrayPlotting:
 
     def scatter_xarray(dataset, outputs_dirpath, x: str, y: str, c: str=None, discrete: bool=False, s: int=None, name_suffix: str="", 
-                       xlog: bool=False, ylog: bool=False, xlim=None, ylim=None, show_yequalx=False, percentile=None):
+                       xlog: bool=False, ylog: bool=False, xlim=None, ylim=None, show_yequalx=False):
         
         fig, ax = plt.subplots()
 
@@ -3606,19 +3670,6 @@ class XarrayPlotting:
                 ct += 1
             else:
                 plotted = ax.scatter(d[x].values, d[y].values, c=d[c].values, cmap='rainbow', norm=norm, s=s)
-            
-            if percentile is not None:
-                Q1, Q3 = np.percentile(d[y].values, [25, 75])
-                IQR = Q3 - Q1
-
-                median_flux = np.median(d[y].values)
-                mad_flux = np.median(np.abs(d[y].values - median_flux))
-
-                # threshold: median + (k × MAD), typical k = 3-5
-                threshold = median_flux + 3 * mad_flux
-                # threshold = np.percentile(d[y].values, percentile)
-                # threshold= Q3 + 1.5 * IQR
-                ax.plot([0, 0.15], [threshold, threshold], c=list(colorblind_palette.values())[ct])
         
         ax.set_xlabel(f"{x.replace('_', ' ')} ({x_unit})")
         ax.set_ylabel(f"{y.replace('_', ' ')} ({y_unit})")
@@ -3747,7 +3798,7 @@ class XarrayPlotting:
     
 
     def heatmap(data, row_labels, col_labels, ax=None,
-            cbar_kw=None, cbarlabel="", **kwargs):
+            cbar_kw=None, cbarlabel="", ylog=False, xlog=False, **kwargs):
         """
         Create a heatmap from a numpy array and two lists of labels.
 
@@ -3777,28 +3828,31 @@ class XarrayPlotting:
             cbar_kw = {}
 
         # Plot the heatmap
-        im = ax.imshow(data, **kwargs)
+        im = ax.imshow(data, interpolation='none', aspect='auto', **kwargs)
 
         # Create colorbar
         cbar = ax.figure.colorbar(im, ax=ax, **cbar_kw)
         cbar.ax.set_ylabel(cbarlabel, rotation=-90, va="bottom")
 
-        # Show all ticks and label them with the respective list entries.
-        # Let the horizontal axes labeling appear on bottom.
-        ax.set_xticks(range(data.shape[1]), labels=col_labels)
-        
-        ax.set_yticks(range(data.shape[0]), labels=row_labels)
+        # Preprocess labels
+        row_labels_split = [f"{val:.0e}".split("e") for val in row_labels]
+        row_labels = [fr"${int(mantissa)}.10^{{{int(exponent)}}}$" for mantissa, exponent in row_labels_split]
 
-        # Let the horizontal axes labeling appear on top.
-        ax.tick_params(top=True, bottom=False,
-                    labeltop=True, labelbottom=False)
+        # Show all ticks and label them with the respective list entries.
+        x_tick_freq = 2
+        xticks = range(data.shape[1])
+        visible_xticks = [tick for i, tick in enumerate(xticks) if i % x_tick_freq == 0]
+        visible_xticklabels = [col_labels[i] for i in range(len(xticks)) if i % x_tick_freq == 0]
+        ax.set_xticks(visible_xticks, labels=visible_xticklabels)
+
+        ax.set_yticks(range(data.shape[0]), labels=row_labels)
 
         # Turn spines off and create white grid.
         ax.spines[:].set_visible(False)
 
-        ax.set_xticks(np.arange(data.shape[1]+1)-.5, minor=True)
-        ax.set_yticks(np.arange(data.shape[0]+1)-.5, minor=True)
-        ax.grid(which="minor", color="w", linestyle='-', linewidth=3)
+        # ax.set_xticks(np.arange(data.shape[1]+1)-.5, minor=False)
+        # ax.set_yticks(np.arange(data.shape[0]+1)-.5, minor=False)
+        # ax.grid(which="minor", color="w", linestyle='-', linewidth=3)
         # ax.tick_params(which="minor", bottom=False, left=False)
         ax.tick_params(top=False, bottom=True, labeltop=False, labelbottom=True)
 
