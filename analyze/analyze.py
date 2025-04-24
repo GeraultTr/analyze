@@ -474,6 +474,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
             unique_times = np.arange(10, 61, 1)
             # scenario_concentrations = [0.1,	0.01, 0.05, 0.5, 5,	50]
             # unique_concentrations = sorted([0.01, 0.05, 0.5, 5, 50])
+            # unique_concentrations = [5e-3]
             unique_concentrations  = np.logspace(0, 4, 11) * 5e-3
 
             manual_scenario_times = {}
@@ -496,14 +497,15 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
             subdataset = dataset[["distance_from_tip", "root_order", "axis_index", "label", "struct_mass", "length", "Net_mineral_N_uptake"]]
 
 
-            # subdataset = subdataset.load()
+            subdataset = subdataset.load()
             # print(subdataset['Net_mineral_N_uptake'])
 
-            # del dataset
-            # import gc
-            # gc.collect()
+            del dataset
+            import gc
+            gc.collect()
 
-            RootCyNAPSFigures.Fig_4_v0(dataset=subdataset, scenarios=scenarios, scenario_times=manual_scenario_times, scenario_concentrations=scenario_concentrations, outputs_dirpath=outputs_dirpath, flow='Net_mineral_N_uptake', name_suffix="_batch4")
+            RootCyNAPSFigures.Fig_4_v0(dataset=subdataset, scenarios=scenarios, scenario_times=manual_scenario_times, scenario_concentrations=scenario_concentrations, 
+                                       outputs_dirpath=outputs_dirpath, flow='Net_mineral_N_uptake', name_suffix="_batch4.4", max_processes=31)
             # RootCyNAPSFigures.Fig_3_lists_embedding_2(dataset=subdataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_mineral_N_uptake", name_suffix="_high")
             # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_AA_Exudation") 
             # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_AA_Exudation") 
@@ -3336,7 +3338,7 @@ class RootCyNAPSFigures:
         fig.savefig(os.path.join(outputs_dirpath, f"final_graph_{flow}{name_suffix}" + ".png"), dpi=720, bbox_inches="tight")
 
     
-    def Fig_4_v0(dataset, scenarios, scenario_times, scenario_concentrations, outputs_dirpath, flow, name_suffix=""):
+    def Fig_4_v0(dataset, scenarios, scenario_times, scenario_concentrations, outputs_dirpath, flow, name_suffix: str="", max_processes: int=None):
         
         parallel = True
         
@@ -3349,7 +3351,8 @@ class RootCyNAPSFigures:
 
         if parallel:
             processes = []
-            max_processes = int(mp.cpu_count() / 2)
+            if max_processes is None:
+                max_processes = int(mp.cpu_count() / 2)
             with mp.Manager() as manager:
                 results = manager.dict()
 
@@ -3416,14 +3419,12 @@ class RootCyNAPSFigures:
 
 
     def worker_Fig4(dataset, scenario, scenario_time, scenario_concentration, flow, shared_dict=None):
-        dataset = dataset.load()
-        print("prior", scenario, dataset[flow])
+        # dataset = dataset.load()
         scenario_dataset = filter_dataset(dataset, scenario=scenario)
-        print("inside", scenario, scenario_dataset[flow])
 
-        import gc
-        del dataset
-        gc.collect()
+        # import gc
+        # del dataset
+        # gc.collect()
 
         all_axes = [axis_id for axis_id in scenario_dataset["axis_index"].values.flatten() if isinstance(axis_id, str)]
         unique = np.unique(all_axes)
@@ -3433,7 +3434,6 @@ class RootCyNAPSFigures:
         laterals_id = [axis_id for axis_id in unique if axis_id.startswith("lateral")]
         
         final_dataset = filter_dataset(scenario_dataset, time=((scenario_time + 1)  * 24)) #TODO tooooo specific here
-        print("final", scenario, final_dataset[flow])
 
         seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
         nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
@@ -3448,23 +3448,53 @@ class RootCyNAPSFigures:
         for name, d in plotted_datasets.items():
             # We filter only positive values to avoid accounting for non coherent percentage when some regions don't net actively import
             d[flow] = d[flow].where(d[flow] > 0, other=0.)
-            total_geometry = d[grouped_geometry].sum()
-            total_flow = d[flow].sum()
+            total_geometry = float(d[grouped_geometry].sum())
+            total_flow = float(d[flow].sum())
             d[f"{flow}_per_{normalization_property}"] = Indicators.compute(d, formula=f"{flow} / {normalization_property}")
 
             # We sort by this efficiency of absorption
             cumsummed_dataset = d.sortby(f"{flow}_per_{normalization_property}", ascending = False)
+            # print(cumsummed_dataset[flow])
 
             # Yields the percentage of length, ordered by massic absorption
-            cumsummed_dataset[grouped_geometry] = (cumsummed_dataset[grouped_geometry] / total_geometry).cumsum(dim="vid")
+            if total_geometry > 0 and total_flow > 0:
+                cumsummed_dataset[f"{grouped_geometry}_cumsummed"] = cumsummed_dataset[grouped_geometry].cumsum(dim="vid") / total_geometry
 
-            # We crop to test hypotheses from litterature
-            cropped_dataset = cumsummed_dataset.where(cumsummed_dataset[grouped_geometry] <= proportion_of_geometry, drop=True)
+                # We crop to test hypotheses from litterature
+                cropped_dataset = cumsummed_dataset.where(cumsummed_dataset[f"{grouped_geometry}_cumsummed"] <= proportion_of_geometry, drop=True)
+                # Then we get the quantity per time unit of this root zone
+                group_contribution = float(cropped_dataset[flow].sum(dim="vid").values)
+
+                # print(cropped_dataset[flow])
+                ignored_geometry = (proportion_of_geometry - float(cropped_dataset[grouped_geometry].sum(dim="vid").values)) * total_geometry
+                ignored_dataset = cumsummed_dataset.where(cumsummed_dataset[f"{grouped_geometry}_cumsummed"] > proportion_of_geometry, drop=True)
+                if len(ignored_dataset[grouped_geometry].values) > 0:
+                    element_id = 0
+                    while ignored_geometry > 0:
+
+                        print(ignored_geometry)
+                        local_geometry = float(ignored_dataset[grouped_geometry].values[element_id])
+                        local_flow = float(ignored_dataset[flow].values[element_id])
+
+                        if local_geometry < ignored_geometry:
+                            group_contribution += local_flow
+                            ignored_geometry -= local_geometry
+
+                        else:
+                            if local_geometry > 0:
+                                group_contribution += (ignored_geometry / local_geometry) * local_flow # For small root systems, ignoring this might lead to important mistake as 4.5 mm segments is a coarse partitionning
+                                ignored_geometry = 0
+
+                        element_id += 1
+                    
+                    local_result[name] = dict(proportion=group_contribution / total_flow, top_flow=group_contribution)
+
+                else:
+                    local_result[name] = dict(proportion=0, top_flow=0)
             
-            # Then we get the quantity per time unit of this root zone
-            group_contribution = cropped_dataset[flow].sum(dim="vid")
+            else:
+                local_result[name] = dict(proportion=0, top_flow=0)
 
-            local_result[name] = dict(proportion=float((group_contribution / total_flow).values), top_flow=float(group_contribution.values))
 
         if shared_dict is not None:
             shared_dict[scenario] = local_result
@@ -3810,7 +3840,7 @@ class XarrayPlotting:
         cbar.ax.set_ylabel(cbarlabel, rotation=-90, va="bottom")
 
         # Show ticks and label them with the respective list entries.
-        x_tick_freq = 2  # Keep 1 of every 2 x-axis ticks
+        x_tick_freq = 10  # Keep 1 of every 2 x-axis ticks
 
         # Apply to x-axis
         xticks = range(data.shape[1])
@@ -3820,7 +3850,7 @@ class XarrayPlotting:
         ax.set_xticks(visible_xticks, labels=visible_xticklabels)
 
         row_labels_split = [f"{val:.0e}".split("e") for val in row_labels]
-        row_labels = [fr"${mantissa} \times 10^{{{exponent}}}$" for mantissa, exponent in row_labels_split]
+        row_labels = [fr"${int(mantissa)}.10^{{{int(exponent)}}}$" for mantissa, exponent in row_labels_split]
         ax.set_yticks(range(data.shape[0]), labels=row_labels)
 
         # Turn spines off and create white grid.
