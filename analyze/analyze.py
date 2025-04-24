@@ -22,7 +22,7 @@ pd.set_option("display.width", 0)  # Adjusts to screen width
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, FFMpegWriter
-from matplotlib.ticker import FuncFormatter, LogFormatterSciNotation, ScalarFormatter, StrMethodFormatter, LogLocator, LogFormatter
+from matplotlib.ticker import FuncFormatter, LogFormatterSciNotation, ScalarFormatter, StrMethodFormatter, LogLocator, LogFormatter, PercentFormatter
 from matplotlib.colors import LogNorm
 import matplotlib.patches as mpatches
 from mpl_toolkits.mplot3d import Axes3D
@@ -209,6 +209,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
         #dataset["Cumulative_Carbon_Costs"] = Indicators.Cumulative_Carbon_Costs(d=dataset)
         dataset["Gross_Hexose_Exudation"] = Indicators.Gross_Hexose_Exudation(d=dataset)
         dataset["Net_AA_Exudation"] = Indicators.compute(d=dataset, formula="diffusion_AA_soil + apoplastic_AA_soil_xylem - import_AA")
+        dataset["Lengthy_Net_AA_Exudation"] = Indicators.compute(d=dataset, formula="(diffusion_AA_soil + apoplastic_AA_soil_xylem - import_AA) / length")
         #dataset["Gross_C_Rhizodeposition"] = Indicators.Gross_C_Rhizodeposition(d=dataset)
         #dataset["Rhizodeposits_CN_Ratio"] = Indicators.Rhizodeposits_CN_Ratio(d=dataset)
         #dataset["CN_Ratio_Cumulated_Rhizodeposition"] = Indicators.CN_Ratio_Cumulated_Rhizodeposition(d=dataset)
@@ -229,8 +230,10 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
         dataset["Massic_apoplastic_Nm_soil_xylem"] = Indicators.compute(d=dataset, formula=" - apoplastic_Nm_soil_xylem / struct_mass")
         dataset["Massic_export_xylem"] = Indicators.compute(d=dataset, formula = "(export_Nm - diffusion_Nm_xylem - apoplastic_Nm_soil_xylem) / struct_mass")
         dataset["Massic_root_exchange_surface"] = Indicators.compute(d=dataset, formula = "root_exchange_surface / struct_mass")
-        dataset["Massic_radial_import_water"] = Indicators.compute(d=dataset, formula = "radial_import_water / struct_mass")
+        dataset["Lengthy_radial_import_water"] = Indicators.compute(d=dataset, formula = "radial_import_water / length")
         dataset["Net_mineral_N_export"] = Indicators.compute(d=dataset, formula = "export_Nm - diffusion_Nm_xylem - apoplastic_Nm_soil_xylem")
+        dataset["Lengthy_root_exchange_surface"] = Indicators.compute(d=dataset, formula = 'root_exchange_surface / length')
+        dataset["Lengthy_symplasmic_volume"] = Indicators.compute(d=dataset, formula = 'symplasmic_volume / length')
 
 
         # Z contributions
@@ -252,7 +255,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
         normalized_input_flux = []
         sucrose_input_df = pd.read_csv("inputs/sucrose_input_Swinnen_et_al_1994_20degrees_interpolated.csv", sep=';')
 
-        first_loop = False
+        first_loop = True
 
         if first_loop:
 
@@ -272,7 +275,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
                 # meije_question(scenario_dataset)
                 
                 ### Fig 1 d related
-                running = True
+                running = False
 
                 if running:
 
@@ -309,8 +312,10 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
                     final_dataset = scenario_dataset.sel(t=scenario_times[scenario])[[
                       color, "distance_from_tip", "thermal_time_since_cells_formation", "root_order", "axis_index", "struct_mass", "length",   # Always
                       "Net_mineral_N_uptake", "Lengthy mineral N uptake", "Massic_mineral_N_uptake", "Massic_import_Nm", "Massic_mycorrhizal_mediated_import_Nm", # Specific  
-                      "Massic_apoplastic_Nm_soil_xylem", "Net_AA_Exudation", 
-                      "C_hexose_root", "Nm", "root_exchange_surface", "radial_import_water", "Massic_export_xylem", "Massic_root_exchange_surface", "Massic_radial_import_water", "axial_export_water_up",
+                      "Massic_apoplastic_Nm_soil_xylem", "Net_AA_Exudation", "Nm", "AA", "Lengthy_Net_AA_Exudation",
+                      "C_hexose_root", "Nm", "root_exchange_surface", "radial_import_water", "Massic_export_xylem", "Massic_root_exchange_surface", "Lengthy_radial_import_water", "axial_export_water_up", "xylem_pressure_in",
+                      "thermal_time_since_cells_formation"
+                    #   "net_hexose_production_from_phloem", "phloem_exchange_surface", "Lengthy_root_exchange_surface", "Lengthy_symplasmic_volume", "maintenance_respiration", "hexose_consumption_by_growth"
                       ]]
                     # final_dataset = scenario_dataset.sel(t=scenario_times[scenario])
                     seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
@@ -335,7 +340,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
                     
 
                 # Fig 2 related
-                running = True
+                running = False
 
                 if running:
                     all_axes = [axis_id for axis_id in scenario_dataset["axis_index"].values.flatten() if isinstance(axis_id, str)]
@@ -357,76 +362,6 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
                     RootCyNAPSFigures.Fig_2_one_prop(final_dataset, plotted_datasets, distance_bins, flow="Net_mineral_N_export", normalization_property="length", outputs_dirpath=raw_dirpath, shown_xrange=0.15)
 
                     plt.close()
-
-                # Test thresholding related
-                running = True
-
-                if running:
-                    y = "Net_mineral_N_uptake"
-
-                    all_axes = [axis_id for axis_id in scenario_dataset["axis_index"].values.flatten() if isinstance(axis_id, str)]
-                    unique = np.unique(all_axes)
-
-                    seminal_id = [axis_id for axis_id in unique if axis_id.startswith("seminal")]
-                    nodal_id = [axis_id for axis_id in unique if axis_id.startswith("adventitious")]
-                    laterals_id = [axis_id for axis_id in unique if axis_id.startswith("lateral")]
-
-                    final_dataset = scenario_dataset.sel(t=scenario_times[scenario])[["length", "struct_mass",  "axis_index", y]]
-
-                    seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
-                    nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
-                    lateral_dataset = final_dataset.where(final_dataset["axis_index"].isin(laterals_id), drop=True)
-
-                    per_root_type_ds = dict(seminal=seminal_dataset, nodal=nodal_dataset, lateral=lateral_dataset)
-
-                    axis_type_total_length = {}
-                    axis_active_lentgh = {}
-                    axis_type_total_flow = {}
-                    axis_active_flow = {}
-
-                    for k, d in per_root_type_ds.items():
-                        class_axes = [axis_id for axis_id in d["axis_index"].values.flatten() if isinstance(axis_id, str)]
-                        axis_type_total_length[k] = []
-                        axis_active_lentgh[k] = []
-                        axis_type_total_flow[k] = []
-                        axis_active_flow[k] = []
-                        unique = np.unique(class_axes)
-                        for axis_index in unique:
-                            sub_d = d.where(d["axis_index"]==axis_index, drop=True)
-                            axis_total_length=float(sub_d["length"].sum())
-                            axis_total_flow=float(sub_d[y].sum())
-                            massic_flow = sub_d[y] / sub_d["struct_mass"]
-                            thirdq = np.percentile(massic_flow.values, 90)
-                            active_length = float(sub_d.where(massic_flow >= thirdq, drop=True)["length"].sum())
-                            active_flow = float(sub_d.where(massic_flow >= thirdq, drop=True)[y].sum())
-
-                            axis_type_total_length[k].append(axis_total_length)
-                            axis_active_lentgh[k].append(active_length)
-                            axis_type_total_flow[k].append(axis_total_flow)
-                            axis_active_flow[k].append(active_flow)
-
-                    # print(axis_type_total_length, axis_active_lentgh)
-
-                    overall_lentgh = 0
-                    overall_active_length = 0
-                    overall_flux = 0
-                    overall_active_flux = 0
-                    for k, _ in per_root_type_ds.items():
-                        total_length = sum(axis_type_total_length[k])
-                        active_length = sum(axis_active_lentgh[k])
-                        total_flow = sum(axis_type_total_flow[k])
-                        active_flow = sum(axis_active_flow[k])
-                        print(k, active_length / total_length, active_flow / total_flow)
-                        overall_lentgh += total_length
-                        overall_active_length += active_length
-                        overall_flux  += total_flow
-                        overall_active_flux += active_flow
-
-                    print("overall", overall_active_length / overall_lentgh, overall_active_flux / overall_flux)
-
-                    
-
-
 
                 # print(scenario_dataset.where(scenario_dataset.distance_from_tip < 0.01, drop=True).where(scenario_dataset.z1 < -0.10, drop=True))
                 # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=True, target_vid=122)
@@ -468,13 +403,16 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
 
         ### Fig 2 & 3 related
         # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_mineral_N_uptake", name_suffix="_C_per_apex")
-        autonomous_figures = True
+        autonomous_figures = False
 
         if autonomous_figures:
             # unique_times = np.arange(10, 61, 5)
-            unique_times = np.arange(10, 61, 1)
+            # unique_times = np.arange(10, 61, 1)
+            unique_times = [10, 20, 30, 40, 50, 60]
+            # unique_times = [60]
             # unique_concentrations = np.logspace(0, 4, len(unique_times)) * 5e-3
-            unique_concentrations = np.logspace(0, 4, 11) * 5e-3
+            # unique_concentrations = np.logspace(0, 4, 11) * 5e-3
+            unique_concentrations = [50]
 
             manual_scenario_times = {}
             scenario_concentrations = {}
@@ -497,7 +435,11 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
             # import gc
             # gc.collect()
 
-            RootCyNAPSFigures.Fig_4_v0(dataset=subdataset, scenarios=scenarios, scenario_times=manual_scenario_times, scenario_concentrations=scenario_concentrations, outputs_dirpath=outputs_dirpath, flow='Net_mineral_N_uptake', name_suffix="_length")
+            # RootCyNAPSFigures.Fig_4_v0(dataset=subdataset, scenarios=scenarios, scenario_times=manual_scenario_times, scenario_concentrations=scenario_concentrations, outputs_dirpath=outputs_dirpath, flow='Net_mineral_N_uptake', name_suffix="_length")
+            
+            RootCyNAPSFigures.Fig_5_v0(dataset=dataset, scenarios=scenarios, flow="Net_mineral_N_uptake", outputs_dirpath=outputs_dirpath, scenario_ages=manual_scenario_times, name_suffix=f"_ages_{unique_concentrations[0]:2e}")
+            # RootCyNAPSFigures.Fig_5_v0(dataset=subdataset, scenarios=scenarios, flow="Net_mineral_N_uptake", outputs_dirpath=outputs_dirpath, scenario_ages=unique_times[0], scenario_concentrations=scenario_concentrations, name_suffix=f"_concentrations_{unique_times[0]}")
+            
             # RootCyNAPSFigures.Fig_3_lists_embedding_2(dataset=subdataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_mineral_N_uptake", name_suffix="_high")
             # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_AA_Exudation") 
             # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_AA_Exudation") 
@@ -2725,8 +2667,27 @@ class RootCyNAPSFigures:
 
         if not massic:
             if scatter:
+                s=2
                 fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lengthy mineral N uptake", c=c, 
-                                                discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
+                                                discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="C_hexose_root", y="Lengthy mineral N uptake", c=c, 
+                                                discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="Lengthy_radial_import_water", y="Lengthy mineral N uptake", c=c, 
+                                                discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="axial_export_water_up", y="Lengthy mineral N uptake", c=c, 
+                                                discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=[0, 3e-11], ylim=None)
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="xylem_pressure_in", y="Lengthy mineral N uptake", c=c, 
+                                                discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="Nm", y="Lengthy mineral N uptake", c=c, 
+                                                discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="AA", y="Lengthy mineral N uptake", c=c, 
+                                                discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="Lengthy_Net_AA_Exudation", y="Lengthy mineral N uptake", c=c, 
+                                                discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lengthy_Net_AA_Exudation", c=c, 
+                                                discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="thermal_time_since_cells_formation", y="Lengthy mineral N uptake", c=c, 
+                                                discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
             else:
                 fig, ax = XarrayPlotting.line_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lengthy mineral N uptake", c=c, 
                                                 discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
@@ -2736,6 +2697,8 @@ class RootCyNAPSFigures:
             if scatter:
                 fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Massic_mineral_N_uptake", c=c, 
                                                 discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="net_hexose_production_from_phloem", c=c, 
+                                                discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=[0, 0.3])
             else:
                 fig, ax = XarrayPlotting.line_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Massic_mineral_N_uptake", c=c, 
                                                 discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
@@ -2753,7 +2716,7 @@ class RootCyNAPSFigures:
         return fig, ax
     
     def Fig_1_c_dependancies(scenario_datasets, outputs_path, name_suffix="", xlog = False):
-        properties = ["C_hexose_root", "Massic_root_exchange_surface", "Nm", "Massic_radial_import_water", "Massic_export_xylem", "axial_export_water_up"]
+        properties = ["C_hexose_root", "Massic_root_exchange_surface", "Nm", "Lengthy_radial_import_water", "Massic_export_xylem", "axial_export_water_up"]
         show_line = [False, False, False, False, True, False]
         for i, prop in enumerate(properties):
             fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x=prop, y="Massic_mineral_N_uptake", c=None, 
@@ -3533,7 +3496,70 @@ class RootCyNAPSFigures:
                 shared_dict[k] += [(scenario_times[scenario], v)]
         else:
             return apex_number, apex_length_density, C_consummed_per_apex, grouping_distance, grouping_length
+        
 
+    def Fig_5_v0(dataset, scenarios, flow, outputs_dirpath, scenario_ages, scenario_concentrations=None, name_suffix=""):
+        
+        # scenario_times = dict(zip(scenarios, dataset.t.values))
+
+        fig, ax = plt.subplots()
+
+        ct = 0
+
+        for scenario in scenarios:
+            label = ""
+            if scenario_ages is not None and isinstance(scenario_ages, dict):
+                label += f"{scenario_ages[scenario]} d.o."
+
+            if scenario_concentrations is not None and len(scenario_concentrations) > 1:
+                if len(label) > 0:
+                    label += ", "
+                label += f"{scenario_concentrations[scenario]:.2e} mM"
+
+            if isinstance(scenario_ages, dict):
+                scenario_dataset = filter_dataset(dataset, scenario=scenario, time=(scenario_ages[scenario] + 1) * 24)
+            elif isinstance(scenario_ages, int):
+                scenario_dataset = filter_dataset(dataset, scenario=scenario, time=(scenario_ages + 1) * 24)
+            else:
+                raise ValueError
+
+            x, y = RootCyNAPSFigures.worker_Fig_5(scenario_dataset, flow, grouped_geometry="length", normalization_property="length")
+
+            ax.plot(x, y, c=list(twenty_palette.values())[ct%len(twenty_palette)], label=label)
+
+            ct += 1
+
+        ax.legend()
+        ax.set_xlabel(f"% of root system length")
+        ax.set_ylabel(f"% of {flow.replace('_', ' ')}")
+
+        ax.xaxis.set_major_formatter(PercentFormatter(1.0))
+        ax.yaxis.set_major_formatter(PercentFormatter(1.0))
+        
+        fig.savefig(os.path.join(outputs_dirpath, f"{flow}_vs_length_%_front{name_suffix}.png"), dpi=720, bbox_inches="tight")
+
+
+    def worker_Fig_5(d, flow, grouped_geometry, normalization_property, shared_dict=None, scenario=""):
+        # We filter only positive values to avoid accounting for non coherent percentage when some regions don't net actively import
+        d[flow] = d[flow].where(d[flow] > 0, other=0.)
+        total_geometry = d[grouped_geometry].sum()
+        total_flow = d[flow].sum()
+
+        # Different from length to enable better classification of most active segments
+        d[f"{flow}_per_{normalization_property}"] = Indicators.compute(d, formula=f"{flow} / {normalization_property}")
+        
+        # We sort by this efficiency of absorption
+        cumsummed_dataset = d.sortby(f"{flow}_per_{normalization_property}", ascending = False)
+
+        # Yields the percentage of length, ordered by massic absorption
+        cumsummed_dataset[f"{grouped_geometry}_cumsummed"] = cumsummed_dataset[grouped_geometry].cumsum(dim="vid") / total_geometry
+        cumsummed_dataset[f"{flow}_cumsummed"] = cumsummed_dataset[flow].cumsum(dim="vid") / total_flow
+
+        if shared_dict is not None:
+            shared_dict[scenario] = (cumsummed_dataset[f"{grouped_geometry}_cumsummed"].to_numpy(), cumsummed_dataset[f"{flow}_cumsummed"].to_numpy())
+        else:
+            return cumsummed_dataset[f"{grouped_geometry}_cumsummed"], cumsummed_dataset[f"{flow}_cumsummed"]
+        
 
 class Indicators:
 
@@ -3664,9 +3690,10 @@ class XarrayPlotting:
                 c_unit = unit_from_str(first[c].unit)
 
         ct = 0
+        marker_styles = ["o", "^", "s", "v"]
         for name, d in dataset.items():
             if discrete:
-                plotted = ax.scatter(d[x].values, d[y].values, c=list(colorblind_palette.values())[ct+1], s=s, label=name)
+                plotted = ax.scatter(d[x].values, d[y].values, c=list(colorblind_palette.values())[ct+1], s=s, marker=marker_styles[ct], label=name)
                 ct += 1
             else:
                 plotted = ax.scatter(d[x].values, d[y].values, c=d[c].values, cmap='rainbow', norm=norm, s=s)
