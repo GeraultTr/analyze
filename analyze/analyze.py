@@ -22,10 +22,11 @@ pd.set_option("display.width", 0)  # Adjusts to screen width
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, FFMpegWriter
-from matplotlib.ticker import FuncFormatter, LogFormatterSciNotation, ScalarFormatter, StrMethodFormatter, LogLocator, LogFormatter, PercentFormatter
+from matplotlib.ticker import FuncFormatter, LogFormatterSciNotation, ScalarFormatter, StrMethodFormatter, LogLocator, LogFormatter, PercentFormatter, MultipleLocator
 from matplotlib.colors import LogNorm
 import matplotlib.patches as mpatches
 from mpl_toolkits.mplot3d import Axes3D
+from brokenaxes import BrokenAxes
 
 import xarray as xr
 from dask import delayed, compute
@@ -222,7 +223,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
         dataset["Labile_Nitrogen"] = Indicators.Labile_Nitrogen(d=dataset)
         dataset["cylinder_surface"] = Indicators.cylinder_surface(d=dataset)
         dataset["Net_mineral_N_uptake"] = Indicators.compute(d=dataset, formula="import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - apoplastic_Nm_soil_xylem")
-        dataset["Lengthy mineral N uptake"] = Indicators.compute(d=dataset, formula="(import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - apoplastic_Nm_soil_xylem) / length")
+        dataset["Lineal mineral N uptake"] = Indicators.compute(d=dataset, formula="(import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - apoplastic_Nm_soil_xylem) / length")
         dataset["Massic_mineral_N_uptake"] = Indicators.compute(d=dataset, formula="(import_Nm + mycorrhizal_mediated_import_Nm - diffusion_Nm_soil - apoplastic_Nm_soil_xylem) / struct_mass")
         dataset["Massic_import_Nm"] = Indicators.compute(d=dataset, formula="import_Nm / struct_mass")
         dataset["Massic_mycorrhizal_mediated_import_Nm"] = Indicators.compute(d=dataset, formula="mycorrhizal_mediated_import_Nm / struct_mass")
@@ -283,7 +284,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
                     simple_uptake_per_struct_mass = final_dataset["simple_import_Nm"].sum() / final_dataset["struct_mass"].sum()
 
                     comparision_instructions = {
-                        "Net_mineral_N_uptake" : dict(paper="Devienne et al. 1994", reported_min=1.67e-9, reported_max=2.28e-8, normalize_by='struct_mass', other_models=dict(name="Uniform Michaelis-Menten", value=simple_uptake_per_struct_mass)),
+                        "Net_mineral_N_uptake" : dict(paper="Devienne et al. 1994", reported_min=1.67e-9, reported_max=2.28e-8, normalize_by='struct_mass'), #, other_models=dict(name="Uniform Michaelis-Menten", value=simple_uptake_per_struct_mass)),
                         "Net_AA_Exudation": dict(paper="Cao et al., 2021", reported_min=8.3e-13, reported_max=2.1e-9, normalize_by='struct_mass'),
                         "Nm": dict(paper="Siddiqi et al. 1989", reported_min=1e-5, reported_max=5e-3),
                         "AA": dict(paper="Azevedo Neto et al. 2009", reported_min=6.395e-4, reported_max=1.186e-3),
@@ -294,9 +295,8 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
 
                     plt.close()
                 
-                
                 ### Fig 1 c related
-                running = True
+                running = False
 
                 if running:
 
@@ -311,7 +311,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
                     
                     final_dataset = scenario_dataset.sel(t=scenario_times[scenario])[[
                       color, "distance_from_tip", "thermal_time_since_cells_formation", "root_order", "axis_index", "struct_mass", "length",   # Always
-                      "Net_mineral_N_uptake", "Lengthy mineral N uptake", "Massic_mineral_N_uptake", "Massic_import_Nm", "Massic_mycorrhizal_mediated_import_Nm", # Specific  
+                      "Net_mineral_N_uptake", "Lineal mineral N uptake", "Massic_mineral_N_uptake", "Massic_import_Nm", "Massic_mycorrhizal_mediated_import_Nm", # Specific  
                       "Massic_apoplastic_Nm_soil_xylem", "Net_AA_Exudation", "Nm", "AA", "Lengthy_Net_AA_Exudation",
                       "C_hexose_root", "Nm", "root_exchange_surface", "radial_import_water", "Massic_export_xylem", "Massic_root_exchange_surface", "Lengthy_radial_import_water", "axial_export_water_up", "xylem_pressure_in",
                       "thermal_time_since_cells_formation"
@@ -338,7 +338,6 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
                     plt.close()
 
                     
-
                 # Fig 2 related
                 running = False
 
@@ -350,7 +349,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
                     nodal_id = [axis_id for axis_id in unique if axis_id.startswith("adventitious")]
                     laterals_id = [axis_id for axis_id in unique if axis_id.startswith("lateral")]
                     
-                    final_dataset = filter_dataset(scenario_dataset, time=scenario_times[scenario])[["distance_from_tip", "root_order", "axis_index", "label", "living_struct_mass", "length", "Lengthy mineral N uptake", "Massic_mineral_N_uptake", "Net_mineral_N_export", "hexose_consumption_by_growth", "C_hexose_root", "Net_mineral_N_uptake"]]
+                    final_dataset = filter_dataset(scenario_dataset, time=scenario_times[scenario])[["distance_from_tip", "root_order", "axis_index", "label", "living_struct_mass", "length", "Lineal mineral N uptake", "Massic_mineral_N_uptake", "Net_mineral_N_export", "hexose_consumption_by_growth", "C_hexose_root", "Net_mineral_N_uptake"]]
 
                     seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
                     nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
@@ -362,6 +361,20 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, on_sums=False, on_r
                     RootCyNAPSFigures.Fig_2_one_prop(final_dataset, plotted_datasets, distance_bins, flow="Net_mineral_N_export", normalization_property="length", outputs_dirpath=raw_dirpath, shown_xrange=0.15)
 
                     plt.close()
+
+                # Fig 7 related
+                running = True
+
+                if running:
+                    final_dataset = scenario_dataset.sel(t=scenario_times[scenario])
+                    sucrose_input = sucrose_input_df["sucrose_input_rate"].loc[scenario_times[scenario]]
+                    scenario_info = scenario.split('_')
+                    age = scenario_info[3]
+                    concentration = scenario_info[2]
+
+                    RootCyNAPSFigures.Fig_7_single(d=final_dataset, output_dirpath=raw_dirpath, amino_acid_input_rate=sucrose_input * 0.7, 
+                                                   modalities=[(concentration, age)])
+                    
 
                 # print(scenario_dataset.where(scenario_dataset.distance_from_tip < 0.01, drop=True).where(scenario_dataset.z1 < -0.10, drop=True))
                 # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=True, target_vid=122)
@@ -2492,13 +2505,12 @@ def log_mtg_coordinates(g):
     # We initialize the scene with the MTG g:
     turt.TurtleFrame(g, visitor=root_visitor, turtle=turtle, gc=False)
 
-def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen=False, flow_property=False, background_color="brown", 
-                   imposed_min=None, imposed_max=None, log_scale=False, spinning=False, root_hairs=True):
+def post_color_mtg(mtg_file_path, output_dirpath, property, formula, recording_off_screen=False, normalize_by: str=None, background_color="brown", 
+                   imposed_min=None, imposed_max=None, log_scale=False, spinning=False, root_hairs=True, gltf=True):
     from log.visualize import plot_mtg_alt
     with open(mtg_file_path, "rb") as f:
         g = pickle.load(f)
 
-    print(len(g.properties()["struct_mass"]))
     log_mtg_coordinates(g)
     props = g.properties()
     
@@ -2523,13 +2535,13 @@ def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen
 
     # Then add initial states of plotted compartments
     if not root_hairs:
-        root_system_mesh, color_property = plot_mtg_alt(g, cmap_property=property, flow_property=flow_property)
+        root_system_mesh, color_property = plot_mtg_alt(g, cmap_property=property, normalize_by=normalize_by)
     else:
-        root_system_mesh, color_property, root_hairs_system = plot_mtg_alt(g, cmap_property=property, flow_property=flow_property, root_hairs=root_hairs)
-
+        root_system_mesh, color_property, root_hairs_system = plot_mtg_alt(g, cmap_property=property, normalize_by=normalize_by, root_hairs=root_hairs)
 
     if 0. in color_property:
-                color_property.remove(0.)
+        color_property.remove(0.)
+
     if imposed_min:
         clim_min = imposed_min
     else:
@@ -2539,8 +2551,12 @@ def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen
         clim_max = imposed_max
     else:
         clim_max = max(color_property)
-
-    plotter.add_mesh(root_system_mesh, scalars=property+".m-1", cmap="jet", clim=[clim_min, clim_max], show_edges=False, log_scale=log_scale)
+    
+    if normalize_by is not None:
+        plotter.add_mesh(root_system_mesh, scalars=property + " normalized", cmap="jet", clim=[clim_min, clim_max], show_edges=False, log_scale=log_scale)
+    else:
+        plotter.add_mesh(root_system_mesh, scalars=property, cmap="jet", clim=[clim_min, clim_max], show_edges=False, log_scale=log_scale)
+    
     #plotter.add_text(f"MTG displaying {property} at day", position="upper_left")
     if root_hairs:
         plotter.add_mesh(root_hairs_system, scalars="living_root_hairs_struct_mass", opacity=0.05, cmap="gist_gray", show_edges=False)
@@ -2563,8 +2579,11 @@ def post_color_mtg(mtg_file_path, output_dirpath, property, recording_off_screen
             plotter.write_frame()
 
     input("Save current view?")
+    if gltf:
+        pass
+    else:
+        plotter.screenshot(os.path.join(output_dirpath, f'{property}_plot_snapshot.png'))
 
-    plotter.screenshot(os.path.join(output_dirpath, f'{property}_plot_snapshot.png'))
 
 def add_root_order_when_branching_is_wrong(g):
     root_gen = g.component_roots_at_scale_iter(g.root, scale=1)
@@ -2668,28 +2687,28 @@ class RootCyNAPSFigures:
         if not massic:
             if scatter:
                 s=2
-                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lengthy mineral N uptake", c=c, 
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lineal mineral N uptake", c=c, 
                                                 discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
-                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="C_hexose_root", y="Lengthy mineral N uptake", c=c, 
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="C_hexose_root", y="Lineal mineral N uptake", c=c, 
                                                 discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
-                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="Lengthy_radial_import_water", y="Lengthy mineral N uptake", c=c, 
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="Lengthy_radial_import_water", y="Lineal mineral N uptake", c=c, 
                                                 discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
-                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="axial_export_water_up", y="Lengthy mineral N uptake", c=c, 
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="axial_export_water_up", y="Lineal mineral N uptake", c=c, 
                                                 discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=[0, 3e-11], ylim=None)
-                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="xylem_pressure_in", y="Lengthy mineral N uptake", c=c, 
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="xylem_pressure_in", y="Lineal mineral N uptake", c=c, 
                                                 discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
-                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="Nm", y="Lengthy mineral N uptake", c=c, 
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="Nm", y="Lineal mineral N uptake", c=c, 
                                                 discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
-                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="AA", y="Lengthy mineral N uptake", c=c, 
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="AA", y="Lineal mineral N uptake", c=c, 
                                                 discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
-                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="Lengthy_Net_AA_Exudation", y="Lengthy mineral N uptake", c=c, 
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="Lengthy_Net_AA_Exudation", y="Lineal mineral N uptake", c=c, 
                                                 discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
                 fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lengthy_Net_AA_Exudation", c=c, 
                                                 discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
-                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="thermal_time_since_cells_formation", y="Lengthy mineral N uptake", c=c, 
+                fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="thermal_time_since_cells_formation", y="Lineal mineral N uptake", c=c, 
                                                 discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
             else:
-                fig, ax = XarrayPlotting.line_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lengthy mineral N uptake", c=c, 
+                fig, ax = XarrayPlotting.line_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lineal mineral N uptake", c=c, 
                                                 discrete=discrete, s=1, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
             
             
@@ -3197,7 +3216,7 @@ class RootCyNAPSFigures:
             nodal_id = [axis_id for axis_id in unique if axis_id.startswith("adventitious")]
             laterals_id = [axis_id for axis_id in unique if axis_id.startswith("lateral")]
             
-            final_dataset = filter_dataset(scenario_dataset, time=scenario_times[scenario])[["distance_from_tip", "root_order", "axis_index", "label", "struct_mass", "length", "Lengthy mineral N uptake", "Massic_mineral_N_uptake", "hexose_consumption_by_growth", "C_hexose_root", flow]]
+            final_dataset = filter_dataset(scenario_dataset, time=scenario_times[scenario])[["distance_from_tip", "root_order", "axis_index", "label", "struct_mass", "length", "Lineal mineral N uptake", "Massic_mineral_N_uptake", "hexose_consumption_by_growth", "C_hexose_root", flow]]
 
             seminal_dataset = final_dataset.where(final_dataset["axis_index"].isin(seminal_id), drop=True)
             nodal_dataset = final_dataset.where(final_dataset["axis_index"].isin(nodal_id), drop=True)
@@ -3559,6 +3578,382 @@ class RootCyNAPSFigures:
             shared_dict[scenario] = (cumsummed_dataset[f"{grouped_geometry}_cumsummed"].to_numpy(), cumsummed_dataset[f"{flow}_cumsummed"].to_numpy())
         else:
             return cumsummed_dataset[f"{grouped_geometry}_cumsummed"], cumsummed_dataset[f"{flow}_cumsummed"]
+
+    def Fig_7_single(d, output_dirpath, amino_acid_input_rate, modalities, absolute_fluxes=False):
+        
+        conversion_factor = 1e6 * 3600 
+
+        hats_flux = float(d.import_Nm.sum() - d.import_Nm_LATS.sum()) * conversion_factor
+        lats_flux = float(d.import_Nm_LATS.sum()) * conversion_factor
+        direct_advection_to_xylem = - float(d.apoplastic_Nm_soil_xylem.sum()) * conversion_factor
+        mycorrhiza_uptake = float(d.mycorrhizal_mediated_import_Nm.sum()) * conversion_factor
+        Nm_diffusion_to_soil = float(d.diffusion_Nm_soil.sum()) * conversion_factor
+        AA_exudation_to_soil = float(d.diffusion_AA_soil.sum() + d.apoplastic_AA_soil_xylem.sum()) * 1.4 * conversion_factor
+        AA_reuptake = float(d.import_AA.sum()) * 1.4 * conversion_factor
+        Nm_to_shoot = float(d.Nm_root_shoot_xylem.sum()) * 1e6 # Align from mol.h-1
+        AA_to_shoot = float(d.AA_root_shoot_xylem.sum()) * 1.4 * 1e6 # Align from mol.h-1
+        total_structural_mass = float(d.struct_mass.sum())
+        
+        amino_acid_input = amino_acid_input_rate * 1.4 * conversion_factor
+        
+        # General section
+        input_processes = ['HATS active uptake', 'LATS active uptake', 'Nm through water uptake', 'Mineral N diffusive loss', 'Amino acid exudation', 'Amino acid reuptake']
+        output_processes = ['Amino acid from shoot', 'Mineral N export to shoot', 'Amino acid export to shoot']
+
+        if not absolute_fluxes:
+            hats_flux /= total_structural_mass
+            lats_flux /= total_structural_mass
+            direct_advection_to_xylem /= total_structural_mass
+            mycorrhiza_uptake /= total_structural_mass
+            Nm_diffusion_to_soil /= total_structural_mass
+            AA_exudation_to_soil /= total_structural_mass
+            AA_reuptake /= total_structural_mass
+            Nm_to_shoot /= total_structural_mass
+            AA_to_shoot /= total_structural_mass
+            amino_acid_input /= total_structural_mass
+            
+        processes_values = [[hats_flux, lats_flux, direct_advection_to_xylem, - Nm_diffusion_to_soil, - AA_exudation_to_soil, AA_reuptake, 
+                             amino_acid_input, - Nm_to_shoot, -AA_to_shoot]]
+
+        is_rhizospheric =   [1, 1, 1, 1, 1, 1, 
+                             0, 0, 0]
+        is_mineral =        [1, 1, 1, 1, 0, 0, 
+                             0, 1, 0]
+
+        fig, ax = RootCyNAPSFigures.worker_Fig_7(output_dirpath, input_processes, output_processes, processes_values, modalities, is_rhizospheric, is_mineral, absolute_fluxes=absolute_fluxes)
+
+        filename = f"System_balance_pairbarchart.png"
+
+        fig.set_size_inches(2, 5)
+        fig.savefig(os.path.join(output_dirpath, filename), dpi=720, bbox_inches="tight")
+
+        plt.close()
+
+
+    def worker_Fig_7(output_dirpath, input_processes, output_processes, processes_values, modalities, is_rhizospheric, is_mineral, absolute_fluxes=False, show_legend=False):
+    
+        processes_names = input_processes + output_processes
+
+        offset = 0
+        cold_cmap = plt.get_cmap('cool', len(input_processes)+2*offset)  # Or 'coolwarm', 'Spectral', etc.
+        cold_colors = [cold_cmap(i+offset) for i in range(len(input_processes))]
+        offset = 1
+        warm_cmap = plt.get_cmap('Greens', len(output_processes)+2*offset)  # Or 'coolwarm', 'Spectral', etc.
+        warm_colors = [warm_cmap(i+offset) for i in range(len(output_processes))]
+
+        processes_colors = cold_colors + warm_colors
+
+        rhizospheric_color = 'mediumblue'
+        root_shoot_color = 'saddlebrown'
+
+        # ages = ['Young', 'Old']
+        # N_treatments = ['LowN', 'HighN']
+        # modalities = [(n, age) for n in N_treatments for age in ages]
+
+        pair_gap = 1.2
+        bar_gap = 0.4
+        bar_width = 0.35
+        positions = []
+        current_x = 0
+        for i in range(len(modalities)):
+            positions.append((current_x, current_x + bar_gap))
+            current_x += bar_gap + pair_gap
+        positions = np.array(positions)
+        input_positions = positions[:, 0]
+        output_positions = positions[:, 1]
+
+        y_bound = 16
+        input_test = [sum([v for v in processes_values[k] if v > 0]) < y_bound for k in range(len(modalities))]
+        output_test = [sum([-v for v in processes_values[k] if v < 0]) < y_bound for k in range(len(modalities))]
+
+        if False in input_test or False in output_test:
+            fig = plt.figure(figsize=(10, 6))
+            input_maxs = [sum([v for v in processes_values[k] if v > 0]) for k in range(len(modalities))]
+            output_maxs = [sum([-v for v in processes_values[k] if v < 0]) for k in range(len(modalities))]
+            high_bound = max(input_maxs + output_maxs)
+            low_bound = min(input_maxs + output_maxs)
+            maxs_range = high_bound - low_bound
+            margin_prop = 0.2
+            if low_bound < y_bound:
+                low_bound = max(y_bound, high_bound - margin_prop * maxs_range)
+                high_bound = high_bound + margin_prop * maxs_range
+            else:
+                low_bound = max(y_bound, low_bound - margin_prop * maxs_range)
+                high_bound = high_bound + margin_prop * maxs_range
+            # ax = BrokenAxes(ylims=((0, y_bound), (low_bound, high_bound)), hspace=0.08, fig=fig, diag_color='white', height_ratios=(1, 2))
+            ax = BrokenAxes(ylims=((0, y_bound), (30, 90)), hspace=0.08, fig=fig, diag_color='white', height_ratios=(1, 2))
+            broken = True
+        else:
+            fig, ax = plt.subplots(figsize=(10, 6))
+            broken = False
+
+        accounted_processes = []
+        accounted_colors = []
+        for k in range(len(modalities)):
+            processes_input = [processes_names[i] for i, v in enumerate(processes_values[k]) if v > 0]
+            fill_colors_input = [processes_colors[i] for i, v in enumerate(processes_values[k]) if v > 0]
+            processes_output = [processes_names[i] for i, v in enumerate(processes_values[k]) if v < 0]
+            fill_colors_output = [processes_colors[i] for i, v in enumerate(processes_values[k]) if v < 0]
+            accounted_processes += processes_input + processes_output
+            accounted_colors += fill_colors_input + fill_colors_output
+
+            input_data = [v for v in processes_values[k] if v > 0]
+            output_data = [-v for v in processes_values[k] if v < 0]
+            outline_colors_inputs = [rhizospheric_color if is_rhizospheric[i] == 1 else root_shoot_color for i, v in enumerate(processes_values[k]) if v > 0]
+            outline_colors_outputs = [rhizospheric_color if is_rhizospheric[i] == 1 else root_shoot_color for i, v in enumerate(processes_values[k]) if v < 0]
+            hatches_input = [None if is_mineral[i] == 1 else '///' for i, v in enumerate(processes_values[k]) if v > 0]
+            hatches_output = [None if is_mineral[i] == 1 else '///' for i, v in enumerate(processes_values[k]) if v < 0]
+
+            bottom = 0
+            # INPUT (left bar)
+            for j in range(len(processes_input)):
+                ax.bar(
+                    input_positions[k], input_data[j], bar_width, bottom=bottom,
+                    color=fill_colors_input[j], edgecolor=outline_colors_inputs[j], linewidth=2,
+                    hatch=hatches_input[j], label=None
+                )
+                bottom += input_data[j]
+
+            bottom = 0
+            # OUTPUT (right bar)
+            for j in range(len(processes_output)):
+                ax.bar(
+                    output_positions[k], output_data[j], bar_width, bottom=bottom,
+                    color=fill_colors_output[j], edgecolor=outline_colors_outputs[j], linewidth=2,
+                    hatch=hatches_output[j], label=None
+                )
+                bottom += output_data[j]
+
+        if broken:
+            for k, a in enumerate(ax.axs):
+                a.xaxis.set_ticks([])
+                a.spines['bottom'].set_visible(False)
+                if k == 0:
+                    a.yaxis.set_major_locator(MultipleLocator(20))
+                    a.yaxis.set_minor_locator(MultipleLocator(10))
+                else:
+                    a.yaxis.set_major_locator(MultipleLocator(5))
+                    a.yaxis.set_minor_locator(MultipleLocator(2.5))
+        else:
+            ax.spines['right'].set_visible(False)
+            ax.spines['top'].set_visible(False)
+            # Remove default x-axis
+            ax.set_xticks([])
+            ax.spines['bottom'].set_visible(False)
+
+            if show_legend:
+                ymin, ymax = ax.get_ylim()
+                label_offset = -0.06 * (ymax - ymin)
+
+                # Level 1: +/- over each bar
+                for i in range(len(modalities)):
+                    ax.text(input_positions[i], label_offset * 0.9, '+', ha='center', va='top', fontsize=12)
+                    ax.text(output_positions[i], label_offset * 0.9, '–', ha='center', va='top', fontsize=12)
+
+            
+                # Level 2: Age
+                for i, (_, age) in enumerate(modalities):
+                    center = (input_positions[i] + output_positions[i]) / 2
+                    ax.text(center, label_offset * 1.8, age, ha='center', va='top', fontsize=11)
+
+                N_treatments = np.unique([t[0] for t in modalities])
+
+                # Level 3: N treatment with accolade
+                for i, N in enumerate(N_treatments):
+                    idx = [j for j, (n, _) in enumerate(modalities) if n == N]
+                    if not idx:
+                        continue
+                    left = input_positions[idx[0]]
+                    right = output_positions[idx[-1]]
+                    center = (left + right) / 2
+                    y_bracket = label_offset * 2.8
+                    bracket_height = 0.03 * (ymax - ymin)
+                    ax.plot([left, left, right, right],
+                            [y_bracket, y_bracket - bracket_height, y_bracket - bracket_height, y_bracket],
+                            color='black', lw=1.3, clip_on=False)
+                    ax.text(center, y_bracket - bracket_height - 0.015*(ymax-ymin), N, ha='center', va='top', fontsize=12)
+
+        if not broken:
+            # Set lim to upper power of ten 
+            ymin, ymax = ax.get_ylim()
+
+            next_ten_power = np.power(10, np.ceil(np.log10(ymax)))
+            halfway = next_ten_power / 2
+            if ymax > halfway:
+                ymax = next_ten_power
+            else:
+                ymax = halfway
+            
+            ymax = 25
+            if show_legend:
+                ax.set_ylim(- ymax / 5, ymax)
+            else:
+                ax.set_ylim(0, ymax)
+
+        ax.set_ylabel(f"Flux (µmol N.{unit_from_str('1.g-1')} DW.{unit_from_str('1.h-1')})")
+
+        if show_legend:
+            ax.set_title("Decomposition of Net N uptake in input and output N flows of whole root system balance", pad=40)
+
+            # First legend
+            accounted_colors = [c for c in processes_colors if c in accounted_colors]
+            accounted_processes = [p for p in processes_names if p in accounted_processes]
+
+            color_patches = [
+                mpatches.Patch(facecolor=accounted_colors[i], edgecolor='none', label=accounted_processes[i])
+                for i in range(len(accounted_processes))
+            ]
+            legend1 = ax.legend(handles=color_patches, title="Boundary processes of the root system", bbox_to_anchor=(1.02, 1.0), loc='upper left', frameon=False)
+            ax.add_artist(legend1)
+
+            # --- Second legend: outlines and textures (all together) ---
+            custom_patches = [
+                mpatches.Patch(facecolor='white', edgecolor=rhizospheric_color, linewidth=3, label='Rhizospheric flows'),
+                mpatches.Patch(facecolor='white', edgecolor=root_shoot_color, linewidth=3, label='Root-shoot allocation'),
+                mpatches.Patch(facecolor='white', edgecolor='black', linewidth=1.5, label='Mineral N (plain)'),
+                mpatches.Patch(facecolor='white', edgecolor='black', linewidth=1.5, hatch='///', label='Organic N (textured)'),
+            ]
+            legend2 = ax.legend(
+                handles=custom_patches, 
+                loc='upper left', 
+                bbox_to_anchor=(1.02, 0.50),
+                title="Processes' category",
+                frameon=False
+            )
+
+        return fig, ax
+
+
+    def Fig_7_pie_version(scenario_dataset, scenario_times, scenario):
+        final_dataset = filter_dataset(scenario_dataset, time=scenario_times[scenario])
+
+        hats_flux = float(final_dataset.import_Nm.sum() - final_dataset.import_Nm_LATS.sum())
+        lats_flux = float(final_dataset.import_Nm_LATS.sum())
+        direct_advection_to_xylem = - float(final_dataset.apoplastic_Nm_soil_xylem.sum())
+        Nm_diffusion_to_soil = float(final_dataset.diffusion_Nm_soil.sum())
+        AA_exudation_to_soil = float(final_dataset.diffusion_AA_soil.sum() + final_dataset.apoplastic_AA_soil_xylem.sum())
+
+        if direct_advection_to_xylem < 0:
+            print("Warning forgot a situation")
+
+        if Nm_diffusion_to_soil < 0:
+            raw_N_uptake = hats_flux + lats_flux + direct_advection_to_xylem + Nm_diffusion_to_soil
+            net_N_uptake = raw_N_uptake - AA_exudation_to_soil
+        else:
+            raw_N_uptake = hats_flux + lats_flux + direct_advection_to_xylem
+            net_N_uptake = raw_N_uptake - AA_exudation_to_soil - Nm_diffusion_to_soil
+
+        # print("Absolute", hats_flux, lats_flux, direct_advection_to_xylem, Nm_diffusion_to_soil,
+        #       raw_N_uptake, net_N_uptake, AA_exudation_to_soil)
+
+        hats_flux /= raw_N_uptake
+        lats_flux /= raw_N_uptake
+        direct_advection_to_xylem /= raw_N_uptake
+        Nm_diffusion_to_soil /= raw_N_uptake
+        AA_exudation_to_soil /= raw_N_uptake
+        net_N_uptake /= raw_N_uptake
+        raw_N_uptake /= raw_N_uptake
+
+        # print("Relative", hats_flux, lats_flux, direct_advection_to_xylem, Nm_diffusion_to_soil,
+        #       raw_N_uptake, net_N_uptake, AA_exudation_to_soil)
+
+        sizes = [hats_flux, lats_flux]
+        labels = ['HATS', 'LATS']
+
+        outputs = 0
+
+        if direct_advection_to_xylem < 0:
+            outputs += direct_advection_to_xylem
+        else:
+            sizes.append(direct_advection_to_xylem)
+            labels.append("Water N advection")
+
+        if Nm_diffusion_to_soil < 0:
+            sizes.append(-Nm_diffusion_to_soil)
+            labels.append("Passive N import")
+        else:
+            outputs += Nm_diffusion_to_soil
+
+        if AA_exudation_to_soil < 0:
+            sizes.append(-AA_exudation_to_soil)
+            labels.append("Passive AA import")
+        else:
+            outputs += AA_exudation_to_soil
+
+        colors = [list(colorblind_palette.values())[k+1] for k in range(len(sizes))]
+
+        # Control the size of the center hole: 0 = no hole, 1 = fully hollow
+        hole_size = outputs  # % hole radius
+        text_label = hole_size
+        circle_1_position = 8
+        circle_2_position = 7
+        text_x = 0
+
+        if hole_size > 0.9:
+            hole_size = 0
+            circle_1_position = 4
+            circle_2_position = 3
+            text_x = np.sqrt(0.8 * AA_exudation_to_soil)
+        # Create pie chart
+        fig, ax = plt.subplots()
+        
+        wedges, texts = ax.pie(sizes, 
+                            labels=[f"{s*100:.1f}%"for s in sizes],          # Show percentages
+                            colors=colors,
+                            wedgeprops=dict(width=1-hole_size),
+                            textprops={'fontsize': 12, 'fontweight': 'bold'})
+
+        # Set zorder for pie components
+        for w in wedges:
+            w.set_zorder(5)
+        for t in texts:
+            t.set_zorder(6)
+        
+        # Draw higher circle (in front)
+        circle_1 = plt.Circle((0, 0), np.sqrt(AA_exudation_to_soil), facecolor='grey', edgecolor='black', lw=1, zorder=circle_1_position)
+        circle_2 = plt.Circle((0, 0), np.sqrt(outputs), facecolor='white', edgecolor='black', lw=1, zorder=circle_2_position)
+        ax.add_artist(circle_1)
+        ax.add_artist(circle_2)
+
+        ax.text(text_x, 0, f"{AA_exudation_to_soil*100:.1f}%", ha='center', va='center', fontsize=12, fontweight='bold', zorder=9)
+
+        put_legend = True
+        if put_legend:
+            # LEGEND MANAGEMENT
+            headers = ['Components of gross mineral N uptake', 'N release building net N uptake']
+            first_header = [mpatches.Patch(facecolor='none', edgecolor='none', label='Components of gross mineral N uptake')]
+
+            # Custom legend items
+            legend_elements_1 = [
+                mpatches.Patch(facecolor=color, label=label) for color, label in zip(colors, labels)]
+
+            second_header = [mpatches.Patch(facecolor='none', edgecolor='none', label=''),
+                            mpatches.Patch(facecolor='none', edgecolor='none', label='N release building net N uptake')]
+
+            legend_elements_2 = [
+                mpatches.Patch(facecolor='grey', edgecolor='black', label="amino acid exudation"),
+                mpatches.Patch(facecolor='white', edgecolor='black', label="mineral N passive loss"),
+            ]
+
+            # Add first custom legend with a title
+            legend = ax.legend(handles=first_header + legend_elements_1 + second_header + legend_elements_2, bbox_to_anchor=(0.95, 0.5), fontsize=6)
+            ax.add_artist(legend)  # Needed to add multiple legends
+
+            # Bold the header texts
+            for text in legend.get_texts():
+                if text.get_text() in headers:
+                    text.set_weight('bold')
+
+        # Equal aspect ratio ensures the pie is drawn as a circle
+        ax.set_xlim([min(-1.1, -AA_exudation_to_soil*1.1), max(2 if put_legend else 1.1, AA_exudation_to_soil*1.1)])
+        ax.set_ylim([min(-4 if put_legend else -1.1, -AA_exudation_to_soil*1.1), max(1.1, AA_exudation_to_soil*1.1)])
+        ax.set_aspect('equal')
+
+        filename = f"Lnet_N_uptake_piechart.png"
+
+        fig.savefig(os.path.join(raw_dirpath, filename), dpi=720, bbox_inches="tight")
+
+        plt.close()
         
 
 class Indicators:
