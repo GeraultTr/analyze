@@ -38,6 +38,9 @@ import pyvista as pv
 from random import random
 import warnings
 
+# Very analysis-specific
+from scipy.stats import pearsonr
+
 from log.visualize import plot_mtg, plot_xr, custom_colorbar, unit_from_str, expand_compact_units, latex_unit_compact
 import openalea.plantgl.all as pgl
 
@@ -246,7 +249,6 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, target_folder_key=N
         dataset["Lineal root exchange surface"] = Indicators.compute(d=dataset, formula = 'root_exchange_surface / length')
         dataset["Lengthy_symplasmic_volume"] = Indicators.compute(d=dataset, formula = 'symplasmic_volume / length')
 
-
         # Z contributions
         zcontrib_flow = "import_Nm"
         fig_zcontrib, ax_zcontrib = plt.subplots(1, 1)
@@ -254,19 +256,19 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, target_folder_key=N
 
         #print(dataset.root_order)
 
-        # First individual analyses
-        oldest_scenario = scenarios[-1]
-        oldest_dataset = dataset
-        # oldest_dataset = filter_dataset(dataset, scenario=oldest_scenario)
-        step = 0.005
-        distance_bins = np.arange(oldest_dataset["distance_from_tip"].min(), 
-                                  oldest_dataset["distance_from_tip"].max() + step, step)
+        # # First individual analyses
+        # oldest_scenario = scenarios[-1]
+        # oldest_dataset = dataset
+        # # oldest_dataset = filter_dataset(dataset, scenario=oldest_scenario)
+        # step = 0.005
+        # distance_bins = np.arange(oldest_dataset["distance_from_tip"].min(), 
+        #                           oldest_dataset["distance_from_tip"].max() + step, step)
         
         grouping_distances = []
         normalized_input_flux = []
-        sucrose_input_df = pd.read_csv("inputs/sucrose_input_Swinnen_et_al_1994_20degrees_interpolated.csv", sep=';')
+        # sucrose_input_df = pd.read_csv("inputs/sucrose_input_Swinnen_et_al_1994_20degrees_interpolated.csv", sep=';')
 
-        first_loop = False
+        first_loop = True
 
         if first_loop:
 
@@ -282,10 +284,8 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, target_folder_key=N
                     raw_dirpath = os.path.join(outputs_dirpath, scenario, subscenario, "MTG_properties/MTG_properties_raw/")
                     mtg_dirpath = os.path.join(outputs_dirpath, scenario, subscenario, "MTG_files/")
 
-                if len(dataset.scenario.values.tolist()) > 1:
-                    scenario_dataset = filter_dataset(dataset, scenario=scenario)
-                else:
-                    scenario_dataset = dataset
+                scenario_filtername = scenario if target_folder_key is None else scenario + "*" + subscenario
+                scenario_dataset = filter_dataset(dataset, scenario=scenario_filtername)
                 # recolorize_glb(100, scenario_dataset, property="Nm", glb_dirpath="", 
                 #                colormap="jet")
 
@@ -330,7 +330,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, target_folder_key=N
                     plt.close()
                 
                 ### Fig 1 c related
-                running = False
+                running = True
 
                 if running:
 
@@ -344,13 +344,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, target_folder_key=N
                     color="C_hexose_root"
                     
                     scenario_time = int(scenario_dataset.t.max())
-                    if isinstance(scenario_dataset.t.values.tolist(), list):
-                        if len(scenario_dataset.t.values.tolist()) > 1:
-                            final_dataset = scenario_dataset.sel(t=scenario_time)
-                        else:
-                            final_dataset = scenario_dataset
-                    else:
-                        final_dataset = scenario_dataset
+                    final_dataset = filter_dataset(scenario_dataset, time=scenario_time)
                     
                     final_dataset = final_dataset[[
                       color, "distance_from_tip", "thermal_time_since_cells_formation", "root_order", "axis_index", "struct_mass", "length",   # Always
@@ -406,7 +400,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, target_folder_key=N
                     plt.close()
 
                 # Fig 7 related
-                running = True
+                running = False
 
                 if running:
                     scenario_time = int(scenario_dataset.t.max())
@@ -425,7 +419,41 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, target_folder_key=N
 
                     RootCyNAPSFigures.Fig_7_single(d=final_dataset, output_dirpath=raw_dirpath, amino_acid_input_rate=sucrose_input * 0.25, 
                                                    modalities=[(concentration, age)])
+                
+                # Fig Poster
+                running = False
                     
+                if running:
+                    surface = 0.15 * 0.15
+
+                    scenario_dataset["rhizodeposition"] = scenario_dataset["hexose_exudation"] * 6 + scenario_dataset["diffusion_AA_soil"] * 5
+                    scenario_dataset["depth"] = - (scenario_dataset["z1"] + scenario_dataset["z2"]) / 2
+                    max_depth = float(scenario_dataset["depth"].max())
+                    depth_bins = np.arange(0, 1, step=0.03*2)
+
+                    binned_ds = scenario_dataset.groupby_bins("depth", depth_bins)
+                    final_ds = scenario_dataset.isel(t=int(scenario_dataset.t.max()))
+                    binned_final_ds = final_ds.groupby_bins("depth", depth_bins)
+                    summed_bins = binned_ds.sum()
+                    final_summed_bins = binned_final_ds.sum()
+
+                    structurals = ["struct_mass", "living_struct_mass", "length", "root_exchange_surface"]
+                    fluxes = ["hexose_exudation", "diffusion_AA_soil", "import_Nm", "apoplastic_Nm_soil_xylem", "net_Nm_uptake", "radial_import_water",
+                          "hexose_consumption_by_growth", "amino_acids_consumption_by_growth",
+                          "soil_temperature"]
+
+                    export_df = pd.DataFrame()
+                    export_df["depth_bins"] = list(depth_bins)[:-1]
+
+                    for flux in fluxes:
+                        export_df[flux] = summed_bins[flux].values * 3600
+
+                    for structural in structurals:
+                        export_df[structural] = final_summed_bins[structural].values
+                    
+                    export_df.to_csv(os.path.join(raw_dirpath, "replicate_zbin_contributions.csv"))
+
+
 
                 # print(scenario_dataset.where(scenario_dataset.distance_from_tip < 0.01, drop=True).where(scenario_dataset.z1 < -0.10, drop=True))
                 # CN_balance_animation_pipeline(dataset=scenario_dataset, outputs_dirpath=os.path.join(outputs_dirpath, scenario), fps=fps, C_balance=True, target_vid=122)
@@ -467,7 +495,7 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, target_folder_key=N
 
         ### Fig 2 & 3 related
         # RootCyNAPSFigures.Fig_3_embedding_2(dataset=dataset, scenarios=scenarios, outputs_dirpath=outputs_dirpath, flow="Net_mineral_N_uptake", name_suffix="_C_per_apex")
-        autonomous_figures = True
+        autonomous_figures = False
 
         if autonomous_figures:
             # unique_times = np.arange(10, 61, 5)
@@ -572,13 +600,56 @@ def analyze_data(scenarios, outputs_dirpath, inputs_dirpath, target_folder_key=N
     if on_shoot_logs:
         for scenario in scenarios:
             print(" [INFO] Starting producing CN-Wheat plots...")
-            cnwheat_plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/shoot_properties"))
-            print(" [INFO] Finished  CN-Wheat plots")
+            if target_folder_key is None:
+                cnwheat_plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/shoot_properties"))
+                print(" [INFO] Finished  CN-Wheat plots")
 
-            print(" [INFO] Starting comparision plots on CN-Wheat outputs...")
-            compare_shoot_outputs(reference_dirpath=os.path.join(inputs_dirpath, "postprocessing"),
-                                  newsimu_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/shoot_properties"),
-                                  meteo_data_dirpath=os.path.join(inputs_dirpath, "meteo_Ljutovac2002.csv"))
+                print(" [INFO] Starting comparision plots on CN-Wheat outputs...")
+                compare_shoot_outputs(reference_dirpath=os.path.join(inputs_dirpath, "postprocessing"),
+                                    newsimu_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/shoot_properties"),
+                                    meteo_data_dirpath=os.path.join(inputs_dirpath, "meteo_Ljutovac2002.csv"))
+            else:
+                running = False
+
+                if running:
+                    cnwheat_plot_csv(csv_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/shoot_properties"))
+                    print(" [INFO] Finished  CN-Wheat plots")
+
+                    print(" [INFO] Starting comparision plots on CN-Wheat outputs...")
+                    compare_shoot_outputs(reference_dirpath=os.path.join(inputs_dirpath, "postprocessing"),
+                                        newsimu_dirpath=os.path.join(outputs_dirpath, scenario, "MTG_properties/shoot_properties"),
+                                        meteo_data_dirpath=os.path.join(inputs_dirpath, "meteo_Ljutovac2002.csv"))
+                
+                running = True
+
+                if running:
+                    
+                    shoot_folder = os.path.join(outputs_dirpath, scenario, target_folder_key, "MTG_properties/shoot_properties")
+                    elements_df = pd.read_csv(os.path.join(shoot_folder, "elements_outputs.csv"))
+                    elements_df = elements_df.fillna(0)
+                    final_time = max(elements_df["t"].values)
+                    final_df = elements_df[elements_df["t"] == final_time]
+                    elements_df["abs_PARa"] = elements_df["PARa"] * elements_df["green_area"]
+                    elements_df["abs_Ag"] = elements_df["Ag"] * elements_df["green_area"]
+                    height_bins = np.arange(0, 0.12, 0.01)
+
+                    elements_df['bins'] = pd.cut(elements_df['height'], bins=height_bins)
+                    final_df['bins'] = pd.cut(final_df['height'], bins=height_bins)
+
+                    binned_par = elements_df.groupby('bins')['abs_PARa'].sum()
+                    binned_ag = elements_df.groupby('bins')['abs_Ag'].sum()
+                    binned_green_area = final_df.groupby('bins')['green_area'].sum()
+                    binned_mstruct = final_df.groupby('bins')['mstruct'].sum()
+
+                    output_df = pd.DataFrame({"height_bins": height_bins[:-1], 
+                                              "binned_PARa": binned_par.values,
+                                              "binned_Ag": binned_ag.values,
+                                              "binned_area": binned_green_area.values,
+                                              "binned_mstruct": binned_mstruct.values})
+
+                    output_df.to_csv(os.path.join(shoot_folder, f"shoot_bins_{target_folder_key}.csv"))
+            
+            
             print(" [INFO] Finished comparision plots on CN-Wheat outputs...")
 
     if on_performance:
@@ -1872,8 +1943,11 @@ def filter_dataset(d, scenario=None, time=None, tmin=None, tmax=None, vids=[], o
         d = d[only_keep]
 
     if time:
-        d = d.where(d.t == time, drop=True) #.sum(dim="t")
-        dims_to_drop.append("t")
+        if hasattr(d, "t"):
+            d = d.where(d.t == time, drop=True) #.sum(dim="t")
+            dims_to_drop.append("t")
+        else:
+            print("Ignored time filtering since not in available dimensions")
     else:
         if tmin:
             d = d.where(d.t >= tmin)
@@ -2749,18 +2823,18 @@ class RootCyNAPSFigures:
 
         if not massic:
             if scatter:
-                correlations = False
+                correlations = True
                 s=2
                 fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="distance_from_tip", y="Lineal mineral N uptake", c=c, 
                                                 discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=xlim, ylim=ylim)
                 fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="Lineal root exchange surface", y="Lineal mineral N uptake", c=c, 
                                                 discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None, show_correlation=correlations)
                 fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="Lineal root exchange surface", y="Lineal_radial_import_water", c=c, 
-                                                discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None, show_correlation=correlations)
+                                                discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
                 fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="C_hexose_root", y="Lineal mineral N uptake", c=c, 
                                                 discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None, show_correlation=correlations)
                 fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="Lineal_radial_import_water", y="Lineal mineral N uptake", c=c, 
-                                                discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None)
+                                                discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=None, ylim=None, show_correlation=correlations)
                 fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="axial_export_water_up", y="Lineal mineral N uptake", c=c, 
                                                 discrete=discrete, s=s, xlog=xlog, name_suffix=name_suffix, xlim=[0, 3e-11], ylim=None)
                 fig, ax = XarrayPlotting.scatter_xarray(scenario_datasets, outputs_dirpath=outputs_path, x="xylem_pressure_in", y="Lineal mineral N uptake", c=c, 
@@ -4118,8 +4192,10 @@ class XarrayPlotting:
 
         ax.xaxis.set_major_formatter(formatter)
         ax.yaxis.set_major_formatter(formatter)
-        ax.ticklabel_format(axis='y', style='sci', scilimits=(-3, 3))
+        ax.ticklabel_format(axis='y', style='sci', scilimits=(-2, 2))
+        ax.ticklabel_format(axis='x', style='sci', scilimits=(-2, 2))
         ax.yaxis.offsetText.set_visible(True)
+        ax.xaxis.offsetText.set_visible(True)
 
         # bounds = dict(vmin=1e-5, vmax=1e-3)
         bounds = dict(vmin=None, vmax=None)
@@ -4152,7 +4228,11 @@ class XarrayPlotting:
         marker_styles = ["o", "^", "s", "v"]
         for name, d in dataset.items():
             if discrete:
-                plotted = ax.scatter(d[x].values, d[y].values, c=list(colorblind_palette.values())[ct+1], s=s, marker=marker_styles[ct], label=name)
+                suffix = ""
+                if show_correlation:
+                    r, p_value = pearsonr(d[y].values, d[x].values)
+                    suffix = f" ({r:.2g})"
+                plotted = ax.scatter(d[x].values, d[y].values, c=list(colorblind_palette.values())[ct+1], s=s, marker=marker_styles[ct], label=f"{name}{suffix}")
                 ct += 1
             else:
                 plotted = ax.scatter(d[x].values, d[y].values, c=d[c].values, cmap='rainbow', norm=norm, s=s)
@@ -4191,18 +4271,8 @@ class XarrayPlotting:
             # Plot the line
             ax.plot(x_vals, y_vals, linestyle='--', color='gray', label='y = x')
 
-        if show_correlation:
-            from scipy.stats import pearsonr
-            r, p_value = pearsonr(d[x].values, d[y].values)
-            # Show correlation on the plot
-            # ax.text(0.07 * min(d[x].values), 0.95 * max(d[y].values), f"r = {r:.2f}",
-            #         transform=ax.transAxes, fontsize=12, verticalalignment='top')
-            ax.text(0.05 , 0.75, f"r = {r:.2f}",
-                    transform=ax.transAxes, fontsize=10, verticalalignment='top')
-
         filename = f"Scatter_{y}_vs_{x}_colored_by_{c}{name_suffix}.png"
         
-
         fig.savefig(os.path.join(outputs_dirpath, filename), dpi=720, bbox_inches="tight")
 
         return fig, ax
